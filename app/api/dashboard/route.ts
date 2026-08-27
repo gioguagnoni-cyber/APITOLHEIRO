@@ -73,10 +73,14 @@ export async function GET() {
   }
 
   const fixtureIds = analyses.map((analysis) => analysis.fixture_id);
+  // The radar is pre-match only. Historic analyses remain auditable in the
+  // database, but are not allowed to reappear as current candidates.
+  const currentWindowStart = new Date(Date.now() - 15 * 60_000).toISOString();
   const { data: fixtures } = await supabase
     .from("fixtures")
     .select("id, provider_fixture_id, competition_id, home_team_id, away_team_id, kickoff_at")
     .in("id", fixtureIds)
+    .gte("kickoff_at", currentWindowStart)
     .returns<FixtureRow[]>();
   const fixtureMap = new Map((fixtures || []).map((fixture) => [fixture.id, fixture]));
   const teamIds = [...new Set((fixtures || []).flatMap((fixture) => [fixture.home_team_id, fixture.away_team_id]))];

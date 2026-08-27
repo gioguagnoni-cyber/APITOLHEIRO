@@ -22,8 +22,8 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 1. Copie .env.example para .env.local.
 2. Em SUPABASE_SECRET_KEY, use uma chave sb_secret do projeto Supabase apenas no ambiente do servidor. SUPABASE_SERVICE_ROLE_KEY continua aceito somente para compatibilidade com a chave legada.
 3. Em API_FOOTBALL_KEY, use uma única chave legítima da API-Sports.
-4. Defina CRON_SECRET com um valor aleatório longo e configure o mesmo valor na Vercel.
-5. Faça deploy. O cron em vercel.json executa diariamente às 11:00 UTC, equivalente a 08:00 BRT.
+4. Defina CRON_SECRET com um valor aleatório longo no ambiente do servidor.
+5. No agendador do provedor de hospedagem escolhido, programe uma chamada diária às 11:00 UTC (08:00 BRT) para `/api/cron/refresh`, com o cabeçalho `Authorization: Bearer CRON_SECRET`.
 
 O banco já possui as migrações em supabase/migrations. A aplicação usa um teto padrão de 90 chamadas/dia, propositalmente abaixo das 100 fornecidas pelo plano gratuito.
 
