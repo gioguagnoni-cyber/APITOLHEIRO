@@ -10,9 +10,28 @@
   const statsbombStatus = document.querySelector("#statsbomb-status");
   const footballDataSource = document.querySelector("#football-data-source");
   const footballDataStatus = document.querySelector("#football-data-status");
+  const publicationCopy = document.querySelector("#publication-copy");
+  const results = document.querySelector("#results");
+  const resultsMeta = document.querySelector("#results-meta");
   const refreshButton = document.querySelector("#refresh-button");
   const leagueFilter = document.querySelector("#league-filter");
   const tierButtons = [...document.querySelectorAll("[data-tier]")];
+  const ownerAccess = document.querySelector("#owner-access");
+  const ownerDialog = document.querySelector("#owner-dialog");
+  const ownerClose = document.querySelector("#owner-close");
+  const ownerEmail = document.querySelector("#owner-email");
+  const ownerLink = document.querySelector("#owner-link");
+  const ownerAuthPanel = document.querySelector("#owner-auth-panel");
+  const ownerAuthMessage = document.querySelector("#owner-auth-message");
+  const aiForm = document.querySelector("#ai-settings-form");
+  const aiProvider = document.querySelector("#ai-provider");
+  const aiModel = document.querySelector("#ai-model");
+  const aiApiKey = document.querySelector("#ai-api-key");
+  const aiEnabled = document.querySelector("#ai-enabled");
+  const aiMaxReviews = document.querySelector("#ai-max-reviews");
+  const aiSettingsStatus = document.querySelector("#ai-settings-status");
+  const ownerSignout = document.querySelector("#owner-signout");
+  let ownerToken = sessionStorage.getItem("apitoleiro_owner_access_token") || "";
   const numbers = {
     screened: document.querySelector("#screened-count"),
     analyzed: document.querySelector("#analyzed-count"),
@@ -320,6 +339,122 @@
     footballDataSource.classList.toggle("ready", verified > 0);
   }
 
+  function renderPublication(payload) {
+    const publication = payload.publication || {};
+    const schedule = payload.schedule || {};
+    const date = publication.targetDate ? new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit" }).format(new Date(`${publication.targetDate}T12:00:00-03:00`)) : null;
+    const published = Number(publication.analysesPublished) || 0;
+    const detected = Number(publication.fixturesDetected) || 0;
+    if (publication.status === "completed") {
+      publicationCopy.textContent = `${date ? `Dia-alvo ${date}: ` : ""}${published}/${detected} jogos prioritários receberam Tier. A publicação ocorre às ${schedule.nextDayScan || "23:30"} BRT; a conferência de resultado roda às ${(schedule.resultChecks || []).join(", ")} BRT.`;
+    } else if (publication.status === "running") {
+      publicationCopy.textContent = `${date ? `Dia-alvo ${date}: ` : ""}varredura em andamento. O feed só trata a análise como publicada quando a rotina termina.`;
+    } else if (publication.status === "failed") {
+      publicationCopy.textContent = "A última varredura não foi concluída. Nenhum resultado será atribuído a uma análise inexistente; verifique a próxima execução programada.";
+    } else {
+      publicationCopy.textContent = `A próxima varredura cria o mapa do dia seguinte às ${schedule.nextDayScan || "23:30"} BRT. Jogos prioritários recebem Tier 1–4, inclusive quando não atingem a meta.`;
+    }
+  }
+
+  function renderResults(payload) {
+    results.replaceChildren();
+    const resultData = payload.results || {};
+    const green = Number(resultData.greenCount) || 0;
+    const red = Number(resultData.redCount) || 0;
+    const pending = Number(resultData.pendingCount) || 0;
+    resultsMeta.textContent = `${green} green · ${red} red · ${pending} aguardando. Mercado 1X2: somente 90 minutos e acréscimos.`;
+    const history = Array.isArray(resultData.history) ? resultData.history : [];
+    if (!history.length) {
+      results.append(emptyState("Ainda não há publicação liquidada.", "Quando um jogo publicado terminar, a rotina registrará Green, Red ou Anulado sem reescrever a análise original.", false));
+      return;
+    }
+    const table = element("div", "result-table");
+    const header = element("div", "result-row result-head");
+    ["Campeonato", "Jogo", "Publicação", "Tier", "Resultado 90'", "Liquidação"].forEach((label) => header.append(element("span", "", label)));
+    table.append(header);
+    history.forEach((item) => {
+      const row = element("div", "result-row");
+      const competition = element("div");
+      competition.append(element("strong", "", item.league || "Competição"), element("small", "", item.country || "Internacional"));
+      const match = element("div");
+      match.append(element("strong", "", `${item.homeName || "Mandante"} × ${item.awayName || "Visitante"}`), element("small", "", item.kickoff ? ptShortDate.format(new Date(item.kickoff)) : ""));
+      const publication = element("div");
+      publication.append(element("strong", "", item.favoriteName || "—"), element("small", "", `${item.market || "1X2"} · ${formatNumber(item.probability)}%`));
+      const tier = element("span", `tier-badge tier-${item.tier || 4}`, `Tier ${item.tier || "—"}`);
+      const score = element("div");
+      score.append(element("strong", "", Number.isFinite(Number(item.homeScore90)) && Number.isFinite(Number(item.awayScore90)) ? `${item.homeScore90} × ${item.awayScore90}` : "—"), element("small", "", "90 min. + acréscimos"));
+      const status = String(item.settlement || "void");
+      const statusLabel = { green: "GREEN", red: "RED", void: "ANULADO" }[status] || "ANULADO";
+      const outcome = element("div", `result-outcome ${status}`, statusLabel);
+      outcome.append(element("small", "", item.note || ""));
+      row.append(competition, match, publication, tier, score, outcome);
+      table.append(row);
+    });
+    results.append(table);
+  }
+
+  const ownerHeaders = () => ({
+    apikey: config.publishableKey,
+    Authorization: `Bearer ${ownerToken}`,
+    "Content-Type": "application/json",
+  });
+
+  async function ownerRpc(name, body = {}) {
+    const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
+      method: "POST", headers: ownerHeaders(), body: JSON.stringify(body), credentials: "omit",
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.message || `Acesso indisponível (${response.status})`);
+    return payload;
+  }
+
+  function updateModelForProvider() {
+    const defaults = { openai: "gpt-4.1-mini", deepseek: "deepseek-chat", google: "gemini-2.0-flash" };
+    aiModel.value = defaults[aiProvider.value] || "";
+  }
+
+  function clearOwnerSession(message = "Sessão do proprietário encerrada.") {
+    ownerToken = "";
+    sessionStorage.removeItem("apitoleiro_owner_access_token");
+    ownerAuthPanel.hidden = false;
+    aiForm.hidden = true;
+    ownerAuthMessage.textContent = message;
+  }
+
+  async function renderOwnerSettings() {
+    if (!ownerToken) return;
+    try {
+      const settings = await ownerRpc("get_ai_provider_settings");
+      if (!settings?.isAdmin) {
+        clearOwnerSession("Este e-mail não possui permissão de proprietário.");
+        return;
+      }
+      ownerAuthPanel.hidden = true;
+      aiForm.hidden = false;
+      if (settings.provider) aiProvider.value = settings.provider;
+      if (settings.model) aiModel.value = settings.model;
+      aiEnabled.checked = settings.enabled === true;
+      aiMaxReviews.value = String(settings.maxReviewsPerRun ?? 0);
+      aiSettingsStatus.textContent = settings.encryptionReady
+        ? (settings.configured ? `Chave configurada em ${settings.configuredAt ? ptShortDate.format(new Date(settings.configuredAt)) : "data não informada"}. Informe outra chave apenas para substituir a atual.` : "Nenhuma chave configurada. A análise estatística continua independente.")
+        : "Falta preparar a chave mestra de criptografia no Vault; a chave de provedor não será aceita antes disso.";
+      aiApiKey.required = !settings.configured;
+    } catch (error) {
+      clearOwnerSession(error instanceof Error ? error.message : "Não foi possível validar a sessão.");
+    }
+  }
+
+  async function importOwnerSessionFromUrl() {
+    const fragment = new URLSearchParams(window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "");
+    const accessToken = fragment.get("access_token");
+    if (accessToken) {
+      ownerToken = accessToken;
+      sessionStorage.setItem("apitoleiro_owner_access_token", ownerToken);
+      history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+    }
+    if (ownerToken) await renderOwnerSettings();
+  }
+
   async function load() {
     if (!config?.supabaseUrl || !config?.publishableKey) {
       dashboard.replaceChildren(emptyState("Configuração pública ausente.", "A página não encontrou o contrato do Supabase.", true));
@@ -341,16 +476,19 @@
       });
       if (!response.ok) throw new Error(`Feed indisponível (${response.status})`);
       const payload = await response.json();
-      if (!payload || payload.schemaVersion !== 4 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData) throw new Error("Formato de feed inválido");
+      if (!payload || payload.schemaVersion !== 5 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData || !payload.results) throw new Error("Formato de feed inválido");
       state.payload = payload;
       setSummary(payload);
       renderStatsBombSource(payload);
       renderFootballDataSource(payload);
+      renderPublication(payload);
+      renderResults(payload);
       syncLeagueOptions(payload);
       render();
     } catch (error) {
       dashboard.replaceChildren(emptyState("Não foi possível carregar o radar.", "A leitura pública será tentada novamente quando você clicar em atualizar.", true));
       screening.replaceChildren();
+      results.replaceChildren();
       console.warn("APITOLHEIRO public dashboard", error instanceof Error ? error.message : "unknown error");
     } finally {
       refreshButton.disabled = false;
@@ -367,6 +505,69 @@
     state.league = leagueFilter.value || "all";
     render();
   });
+  ownerAccess.addEventListener("click", () => {
+    ownerDialog.showModal();
+    void renderOwnerSettings();
+  });
+  ownerClose.addEventListener("click", () => ownerDialog.close());
+  ownerDialog.addEventListener("click", (event) => {
+    if (event.target === ownerDialog) ownerDialog.close();
+  });
+  ownerLink.addEventListener("click", async () => {
+    const email = ownerEmail.value.trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      ownerAuthMessage.textContent = "Informe um e-mail válido para receber o link.";
+      return;
+    }
+    ownerLink.disabled = true;
+    ownerLink.textContent = "Enviando…";
+    try {
+      const response = await fetch(`${config.supabaseUrl}/auth/v1/otp`, {
+        method: "POST",
+        credentials: "omit",
+        headers: { apikey: config.publishableKey, Authorization: `Bearer ${config.publishableKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ email, create_user: true, redirect_to: `${window.location.origin}${window.location.pathname}` }),
+      });
+      if (!response.ok) throw new Error("Não foi possível enviar o link de acesso.");
+      ownerAuthMessage.textContent = "Link enviado. Abra-o neste mesmo navegador para liberar a área privada.";
+    } catch (error) {
+      ownerAuthMessage.textContent = error instanceof Error ? error.message : "Falha ao solicitar o link.";
+    } finally {
+      ownerLink.disabled = false;
+      ownerLink.textContent = "Enviar link de acesso";
+    }
+  });
+  aiProvider.addEventListener("change", updateModelForProvider);
+  aiForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const apiKey = aiApiKey.value;
+    if (!apiKey || apiKey.length < 12) {
+      aiSettingsStatus.textContent = "Informe uma chave válida para salvar ou substituir a configuração.";
+      return;
+    }
+    if (!window.confirm("Confirmar o envio desta chave ao cofre criptografado do Supabase? Ela não poderá ser visualizada depois.")) return;
+    const submit = aiForm.querySelector("button[type='submit']");
+    submit.disabled = true;
+    try {
+      const settings = await ownerRpc("save_ai_provider_credential", {
+        p_provider: aiProvider.value,
+        p_api_key: apiKey,
+        p_model: aiModel.value.trim(),
+        p_enabled: aiEnabled.checked,
+        p_max_reviews_per_run: Number(aiMaxReviews.value),
+      });
+      aiApiKey.value = "";
+      aiSettingsStatus.textContent = settings.enabled
+        ? `Configuração salva. Até ${settings.maxReviewsPerRun} revisão(ões) de IA poderão rodar por publicação.`
+        : "Configuração salva com revisão automática desligada.";
+    } catch (error) {
+      aiSettingsStatus.textContent = error instanceof Error ? error.message : "Não foi possível salvar a configuração.";
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  ownerSignout.addEventListener("click", () => clearOwnerSession());
   refreshButton.addEventListener("click", () => void load());
+  void importOwnerSessionFromUrl();
   void load();
 })();

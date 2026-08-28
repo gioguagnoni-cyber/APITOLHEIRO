@@ -9,6 +9,7 @@ type ProviderFixture = {
     away: { id: number; name: string; logo?: string | null; winner?: boolean | null };
   };
   goals?: { home?: number | null; away?: number | null } | null;
+  score?: { fulltime?: { home?: number | null; away?: number | null } | null } | null;
 };
 
 type RecentMetrics = {
@@ -33,6 +34,7 @@ type Prediction = {
   };
 };
 type OddsResponse = {
+  fixture?: { id?: number | null } | null;
   bookmakers?: { name?: string; bets?: { name?: string; values?: { value?: string; odd?: string }[] }[] }[];
 };
 type Injury = { team?: { id?: number } };
@@ -95,17 +97,28 @@ type Insight = {
   reasons: string[];
   caveats: string[];
 };
+type AiWorkerCredential = {
+  provider: "openai" | "deepseek" | "google";
+  api_key: string;
+  model: string;
+  enabled: boolean;
+  max_reviews_per_run: number;
+};
+type AiReview = { summary: string; riskFlags: string[]; scoreDelta: number };
 
 const API_BASE_URL = "https://v3.football.api-sports.io";
 const DAILY_LIMIT = 90;
-const MAX_REQUESTS_PER_RUN = 9;
-const MAX_DETAILED_CANDIDATES = 1;
+// The free API-Football plan has 100 daily calls. A scan intentionally leaves
+// a safety margin for the result checker and provider retries; cached reads do
+// not consume this budget. Every fixture still receives a transparent baseline
+// Tier even if an optional prediction is unavailable near the cap.
+const MAX_REQUESTS_PER_RUN = 82;
 const PRIORITY_LEAGUES = new Set([2, 3, 39, 61, 71, 72, 73, 78, 88, 94, 128, 135, 140, 253]);
 const PROVIDER = "api-football";
 const FOOTBALL_DATA_PROVIDER = "football-data";
 const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4";
 const FOOTBALL_DATA_DAILY_LIMIT = 100;
-const FOOTBALL_DATA_MAX_REQUESTS_PER_RUN = 2;
+const FOOTBALL_DATA_MAX_REQUESTS_PER_RUN = 30;
 const FOOTBALL_DATA_COMPETITION_CODES: Record<number, string> = {
   2: "CL", 3: "EL", 39: "PL", 61: "FL1", 71: "BSA", 78: "BL1", 88: "DED",
   94: "PPL", 135: "SA", 140: "PD", 253: "MLS",
@@ -129,6 +142,9 @@ const utcNow = () => new Date().toISOString();
 const usageDate = () => new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
 }).format(new Date());
+const brtDate = (offsetDays = 0) => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+}).format(new Date(Date.now() + offsetDays * 86_400_000));
 
 const cacheKeyFor = (path: string, query: Record<string, string | number | boolean>) =>
   [path, ...Object.entries(query).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => `${key}=${value}`)].join("|");
@@ -322,7 +338,9 @@ const fixtureResult = (fixture: ProviderFixture, teamId: number) => {
 
 const recentMetrics = (fixtures: ProviderFixture[] | null, teamId: number, upcomingIsHome: boolean): RecentMetrics | null => {
   if (!fixtures?.length) return null;
-  const complete = fixtures.filter((fixture) => ["FT", "AET", "PEN"].includes(fixture.fixture.status.short));
+  const complete = fixtures
+    .filter((fixture) => ["FT", "AET", "PEN"].includes(fixture.fixture.status.short))
+    .sort((left, right) => new Date(right.fixture.date).getTime() - new Date(left.fixture.date).getTime());
   const build = (items: ReturnType<typeof fixtureResult>[]) => ({
     wins: items.filter((item) => item.decided === "win").length,
     draws: items.filter((item) => item.decided === "draw").length,
@@ -515,6 +533,80 @@ const statsBombPrior = (favorite: StatsBombProfile | undefined, opponent: StatsB
   };
 };
 
+const parseAiJson = (value: string): AiReview | null => {
+  const trimmed = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  try {
+    const parsed = JSON.parse(trimmed) as { summary?: unknown; riskFlags?: unknown; scoreDelta?: unknown };
+    const summary = typeof parsed.summary === "string" ? parsed.summary.replace(/\s+/g, " ").trim().slice(0, 360) : "";
+    if (!summary) return null;
+    const flags = Array.isArray(parsed.riskFlags) ? parsed.riskFlags.filter((flag): flag is string => typeof flag === "string").map((flag) => flag.replace(/\s+/g, " ").trim().slice(0, 120)).filter(Boolean).slice(0, 4) : [];
+    const delta = safeNumber(parsed.scoreDelta as string | number | null | undefined) || 0;
+    return { summary, riskFlags: flags, scoreDelta: clamp(delta, -0.02, 0.02) };
+  } catch {
+    return null;
+  }
+};
+
+const reviewWithAi = async (credential: AiWorkerCredential, fixture: ProviderFixture, insight: Insight): Promise<AiReview | null> => {
+  const evidence = {
+    fixture: `${fixture.teams.home.name} x ${fixture.teams.away.name}`,
+    league: fixture.league.name,
+    kickoff: fixture.fixture.date,
+    favorite: insight.favorite,
+    probability: insight.probability,
+    tier: insight.tier,
+    odds: insight.odds,
+    metrics: insight.metrics,
+    caveats: insight.caveats,
+  };
+  const instruction = "Você é um revisor de risco de futebol. Use somente os fatos JSON recebidos. Não prometa resultado, não invente dados e não recomende stake. Retorne APENAS JSON válido com {summary:string,riskFlags:string[],scoreDelta:number}. scoreDelta é ajuste conservador entre -0.02 e 0.02; use 0 se a evidência não justificar ajuste.";
+  const started = Date.now();
+  let response: Response;
+  if (credential.provider === "google") {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(credential.model)}:generateContent?key=${encodeURIComponent(credential.api_key)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: `${instruction}\n\nDADOS:\n${JSON.stringify(evidence)}` }] }], generationConfig: { temperature: 0.1, responseMimeType: "application/json" } }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) throw new Error(`Google AI returned HTTP ${response.status}.`);
+    const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    return parseAiJson(payload.candidates?.[0]?.content?.parts?.[0]?.text || "");
+  }
+  const endpoint = credential.provider === "deepseek" ? "https://api.deepseek.com/chat/completions" : "https://api.openai.com/v1/chat/completions";
+  response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${credential.api_key}` },
+    body: JSON.stringify({
+      model: credential.model,
+      temperature: 0.1,
+      response_format: { type: "json_object" },
+      messages: [{ role: "system", content: instruction }, { role: "user", content: JSON.stringify(evidence) }],
+    }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error(`${credential.provider} returned HTTP ${response.status}.`);
+  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+  console.log("APITOLHEIRO AI review latency", { provider: credential.provider, elapsedMs: Date.now() - started });
+  return parseAiJson(payload.choices?.[0]?.message?.content || "");
+};
+
+const applyAiReview = (insight: Insight, review: AiReview): Insight => {
+  const probability = Math.round(clamp(insight.probability / 100 + review.scoreDelta, 0.38, 0.92) * 100);
+  const score = Math.round(clamp(insight.score / 100 + review.scoreDelta, 0, 1) * 100);
+  const oddsInRange = insight.odds !== null && insight.odds >= 1.3 && insight.odds <= 2.9;
+  return {
+    ...insight,
+    probability,
+    score,
+    tier: tierFor(probability, insight.dataConfidence),
+    eligible: probability >= 75 && oddsInRange && insight.dataConfidence >= 0.65,
+    metrics: { ...insight.metrics, ai: { providerReview: "concluída", scoreDelta: review.scoreDelta } },
+    reasons: [...insight.reasons, `Revisão de IA: ${review.summary}`],
+    caveats: [...insight.caveats, ...review.riskFlags.map((flag) => `Revisão de IA: ${flag}`)],
+  };
+};
+
 const chooseFavorite = (fixture: ProviderFixture, prediction: Prediction[] | null, homePosition: number | null, awayPosition: number | null, homeRecent: RecentMetrics | null, awayRecent: RecentMetrics | null) => {
   const winner = prediction?.[0]?.predictions?.winner?.id;
   if (winner === fixture.teams.home.id) return "home" as const;
@@ -619,7 +711,7 @@ const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, 
   };
 };
 
-const persistInsight = async (fixture: ProviderFixture, insight: Insight) => {
+const persistInsight = async (fixture: ProviderFixture, insight: Insight, targetDate: string, analysisRunId: string) => {
   const home = await upsert<{ id: string }>("teams", "provider_team_id", { provider_team_id: fixture.teams.home.id, name: fixture.teams.home.name, logo_url: fixture.teams.home.logo || null });
   const away = await upsert<{ id: string }>("teams", "provider_team_id", { provider_team_id: fixture.teams.away.id, name: fixture.teams.away.name, logo_url: fixture.teams.away.logo || null });
   const competition = await upsert<{ id: string }>("competitions", "provider_league_id,season", {
@@ -631,67 +723,165 @@ const persistInsight = async (fixture: ProviderFixture, insight: Insight) => {
     kickoff_at: fixture.fixture.date, status_short: fixture.fixture.status.short, status_long: fixture.fixture.status.long,
     venue_name: fixture.fixture.venue?.name || null,
   });
-  await upsert<{ id: string }>("fixture_analyses", "fixture_id", {
-    fixture_id: savedFixture.id, model_version: "v1.2", probability: insight.probability, confidence: insight.dataConfidence,
+  const analysis = await upsert<{ id: string }>("fixture_analyses", "fixture_id", {
+    fixture_id: savedFixture.id, model_version: "v1.3", probability: insight.probability, confidence: insight.dataConfidence,
     model_score: insight.score, tier: insight.tier, eligible: insight.eligible, favorite_side: insight.favorite,
     recommended_market: insight.recommendedMarket, bookmaker: insight.bookmaker, odds: insight.odds,
     implied_probability: insight.impliedProbability, metrics: insight.metrics, reasons: insight.reasons, caveats: insight.caveats,
     analyzed_at: insight.sourceUpdatedAt,
   });
+  // Resolution ignores a duplicate rather than mutating the pre-match snapshot.
+  await databaseRequest("published_analysis_snapshots?on_conflict=fixture_id,target_date,market_code", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+    body: JSON.stringify({
+      analysis_run_id: analysisRunId,
+      fixture_id: savedFixture.id,
+      target_date: targetDate,
+      market_code: "match_winner_90",
+      favorite_side: insight.favorite,
+      recommended_market: insight.recommendedMarket,
+      model_version: "v1.3",
+      probability: insight.probability,
+      confidence: insight.dataConfidence,
+      tier: insight.tier,
+      eligible: insight.eligible,
+      odds: insight.odds,
+      bookmaker: insight.bookmaker,
+      model_snapshot: {
+        analysisId: analysis.id,
+        score: insight.score,
+        impliedProbability: insight.impliedProbability,
+        metrics: insight.metrics,
+        reasons: insight.reasons,
+        caveats: insight.caveats,
+      },
+      published_at: insight.sourceUpdatedAt,
+    }),
+  });
+  return savedFixture;
 };
 
-const runDailyAnalysis = async (apiKey: string, footballDataApiKey: string | null) => {
+const runNextDayAnalysis = async (apiKey: string, footballDataApiKey: string | null) => {
+  const targetDate = brtDate(1);
   const run = await databaseRequest<{ id: string }[]>("ingestion_runs", {
     method: "POST", headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ provider: PROVIDER, run_type: "daily_analysis", started_at: utcNow(), status: "running" }),
+    body: JSON.stringify({ provider: PROVIDER, run_type: "next_day_analysis", started_at: utcNow(), status: "running" }),
   });
   const runId = run[0]?.id;
   if (!runId) throw new Error("Could not start the ingestion audit record.");
+  const publication = await databaseRequest<{ id: string }[]>("analysis_runs", {
+    method: "POST", headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ target_date: targetDate, run_kind: "next_day_scan", started_at: utcNow(), status: "running" }),
+  });
+  const publicationId = publication[0]?.id;
+  if (!publicationId) throw new Error("Could not start the publication audit record.");
   const client = new ApiFootballClient();
   const officialData = new FootballDataClient();
+  let aiCredential: AiWorkerCredential | null = null;
   try {
-    const fixtures = await client.get<ProviderFixture[]>("fixtures", { date: usageDate(), timezone: "America/Sao_Paulo" }, 20, apiKey);
-    const scheduled = fixtures.filter((fixture) => ["NS", "TBD"].includes(fixture.fixture.status.short) && new Date(fixture.fixture.date).getTime() >= Date.now() - 15 * 60_000)
-      .sort((left, right) => fixturePriority(right) - fixturePriority(left) || new Date(left.fixture.date).getTime() - new Date(right.fixture.date).getTime())
-      .slice(0, MAX_DETAILED_CANDIDATES);
+    const configured = await rpc<AiWorkerCredential[]>("get_ai_provider_credential_for_worker");
+    aiCredential = configured?.[0]?.enabled ? configured[0] : null;
+  } catch (error) {
+    console.warn("Optional AI configuration unavailable", { message: error instanceof Error ? error.message : "Unknown error" });
+  }
+  let aiReviewAttempts = 0;
+  try {
+    const fixtures = await client.get<ProviderFixture[]>("fixtures", { date: targetDate, timezone: "America/Sao_Paulo" }, 45, apiKey);
+    const scheduled = fixtures
+      .filter((fixture) => ["NS", "TBD"].includes(fixture.fixture.status.short) && PRIORITY_LEAGUES.has(fixture.league.id))
+      .sort((left, right) => new Date(left.fixture.date).getTime() - new Date(right.fixture.date).getTime());
+    await databaseRequest(`analysis_runs?id=eq.${publicationId}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ fixtures_detected: scheduled.length }),
+    });
+
+    const leagueContexts = new Map<string, { positions: Map<number, number>; seasonFixtures: ProviderFixture[] | null }>();
+    const representativeFixtures = new Map<string, ProviderFixture>();
+    scheduled.forEach((fixture) => representativeFixtures.set(`${fixture.league.id}:${fixture.league.season}`, fixture));
+    for (const [key, fixture] of representativeFixtures) {
+      const standings = await client.optional<StandingsResponse[]>("standings", { league: fixture.league.id, season: fixture.league.season }, 180, apiKey);
+      // A cached season payload provides form and home/away records for every
+      // team in a league, avoiding two provider calls for every individual game.
+      const seasonFixtures = await client.optional<ProviderFixture[]>("fixtures", { league: fixture.league.id, season: fixture.league.season }, 360, apiKey);
+      leagueContexts.set(key, { positions: tablePositions(standings), seasonFixtures });
+    }
+
+    const dailyOdds = await client.optional<OddsResponse[]>("odds", { date: targetDate }, 120, apiKey);
+    const oddsByFixture = new Map<number, OddsResponse>();
+    (dailyOdds || []).forEach((entry) => {
+      if (typeof entry.fixture?.id === "number") oddsByFixture.set(entry.fixture.id, entry);
+    });
+
+    let statsBombProfiles = new Map<string, StatsBombProfile>();
+    try {
+      statsBombProfiles = await getStatsBombProfiles(scheduled.flatMap((fixture) => [fixture.teams.home.name, fixture.teams.away.name]));
+    } catch (error) {
+      console.warn("Optional StatsBomb prior unavailable", { message: error instanceof Error ? error.message : "Unknown error" });
+    }
+
     const insights: Insight[] = [];
     for (const fixture of scheduled) {
-      const standings = await client.optional<StandingsResponse[]>("standings", { league: fixture.league.id, season: fixture.league.season }, 60, apiKey);
+      const context = leagueContexts.get(`${fixture.league.id}:${fixture.league.season}`) || { positions: new Map<number, number>(), seasonFixtures: null };
       const prediction = await client.optional<Prediction[]>("predictions", { fixture: fixture.fixture.id }, 60, apiKey);
-      const odds = await client.optional<OddsResponse[]>("odds", { fixture: fixture.fixture.id }, 180, apiKey);
-      const homeFixtures = await client.optional<ProviderFixture[]>("fixtures", { team: fixture.teams.home.id, last: 20 }, 360, apiKey);
-      const awayFixtures = await client.optional<ProviderFixture[]>("fixtures", { team: fixture.teams.away.id, last: 20 }, 360, apiKey);
-      const injuries = await client.optional<Injury[]>("injuries", { fixture: fixture.fixture.id }, 240, apiKey);
-      const lineups = isKickoffNear(fixture.fixture.date) ? await client.optional<Lineup[]>("fixtures/lineups", { fixture: fixture.fixture.id }, 15, apiKey) : null;
-      let statsBombProfiles = new Map<string, StatsBombProfile>();
-      try {
-        statsBombProfiles = await getStatsBombProfiles([fixture.teams.home.name, fixture.teams.away.name]);
-      } catch (error) {
-        console.warn("Optional StatsBomb prior unavailable", { message: error instanceof Error ? error.message : "Unknown error" });
-      }
       const footballData = await footballDataContext(officialData, footballDataApiKey, fixture);
-      const insight = buildInsight(
+      let insight = buildInsight(
         fixture,
-        tablePositions(standings),
+        context.positions,
         prediction,
-        odds,
-        recentMetrics(homeFixtures, fixture.teams.home.id, true),
-        recentMetrics(awayFixtures, fixture.teams.away.id, false),
-        injuries,
-        lineups,
+        oddsByFixture.has(fixture.fixture.id) ? [oddsByFixture.get(fixture.fixture.id)!] : null,
+        recentMetrics(context.seasonFixtures, fixture.teams.home.id, true),
+        recentMetrics(context.seasonFixtures, fixture.teams.away.id, false),
+        null,
+        null,
         statsBombProfiles.get(normalizedTeamKey(fixture.teams.home.name)),
         statsBombProfiles.get(normalizedTeamKey(fixture.teams.away.name)),
         footballData,
       );
-      await persistInsight(fixture, insight);
+      let review: AiReview | null = null;
+      let reviewLatency: number | null = null;
+      if (aiCredential && aiReviewAttempts < aiCredential.max_reviews_per_run) {
+        const started = Date.now();
+        aiReviewAttempts += 1;
+        try {
+          review = await reviewWithAi(aiCredential, fixture, insight);
+          reviewLatency = Date.now() - started;
+          if (review) {
+            insight = applyAiReview(insight, review);
+          }
+        } catch (error) {
+          console.warn("Optional AI review unavailable", { provider: aiCredential.provider, message: error instanceof Error ? error.message : "Unknown error" });
+        }
+      }
+      const savedFixture = await persistInsight(fixture, insight, targetDate, publicationId);
+      if (review && aiCredential) {
+        await databaseRequest("ai_fixture_reviews", {
+          method: "POST", headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({
+            fixture_id: savedFixture.id,
+            provider: aiCredential.provider,
+            model: aiCredential.model,
+            status: "completed",
+            review: { summary: review.summary, riskFlags: review.riskFlags },
+            score_delta: review.scoreDelta,
+            latency_ms: reviewLatency,
+          }),
+        });
+      }
       insights.push(insight);
     }
     await databaseRequest(`ingestion_runs?id=eq.${runId}`, {
       method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "completed", completed_at: utcNow(), records_written: insights.length }),
     });
+    await databaseRequest(`analysis_runs?id=eq.${publicationId}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "completed", completed_at: utcNow(), analyses_published: insights.length }),
+    });
     return insights;
   } catch (error) {
     await databaseRequest(`ingestion_runs?id=eq.${runId}`, {
+      method: "PATCH", headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ status: "failed", completed_at: utcNow(), error_message: error instanceof Error ? error.message : "Unknown error" }),
+    });
+    await databaseRequest(`analysis_runs?id=eq.${publicationId}`, {
       method: "PATCH", headers: { Prefer: "return=minimal" },
       body: JSON.stringify({ status: "failed", completed_at: utcNow(), error_message: error instanceof Error ? error.message : "Unknown error" }),
     });
@@ -710,8 +900,8 @@ Deno.serve(async (request) => {
     const apiKey = await rpc<string | null>("get_api_football_key");
     if (!apiKey) return Response.json({ error: "API-Football is not configured." }, { status: 503 });
     const footballDataApiKey = await rpc<string | null>("get_football_data_key");
-    const candidates = await runDailyAnalysis(apiKey, footballDataApiKey);
-    return Response.json({ ok: true, analyzed: candidates.length, generatedAt: utcNow() });
+    const candidates = await runNextDayAnalysis(apiKey, footballDataApiKey);
+    return Response.json({ ok: true, targetDate: brtDate(1), analyzed: candidates.length, generatedAt: utcNow() });
   } catch (error) {
     console.error("APITOLHEIRO refresh failed", error instanceof Error ? error.message : "Unknown error");
     return Response.json({ error: "Analysis run failed." }, { status: 500 });

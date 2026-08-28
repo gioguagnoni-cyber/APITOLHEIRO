@@ -16,7 +16,10 @@
           <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
           <span>APITOLHEIRO <b>LAB</b></span>
         </a>
-        <div class="live-status"><span class="live-dot"></span>Radar público · leitura cacheada</div>
+        <div class="masthead-actions">
+          <div class="live-status"><span class="live-dot"></span>Radar público · leitura cacheada</div>
+          <button id="owner-access" class="owner-access" type="button">Área do proprietário</button>
+        </div>
       </header>
 
       <section class="hero" aria-labelledby="hero-title">
@@ -44,6 +47,11 @@
       <section id="football-data-source" class="source-rail source-rail--official" aria-live="polite">
         <div><p class="kicker">CONFERÊNCIA OFICIAL</p><h2>football-data.org</h2></div>
         <p id="football-data-status">Conferindo tabelas e forma por competição…</p>
+      </section>
+
+      <section id="publication-status" class="publication-rail" aria-live="polite">
+        <div><p class="kicker">ROTINA AUTOMÁTICA</p><h2>Próxima publicação</h2></div>
+        <p id="publication-copy">Aguardando o estado da rotina noturna…</p>
       </section>
 
       <section class="content-header">
@@ -79,11 +87,45 @@
         <div id="screening" aria-live="polite"></div>
       </section>
 
+      <section class="results-section" aria-labelledby="results-title">
+        <div class="screening-heading">
+          <div>
+            <p class="kicker">RESULTADOS DAS PUBLICAÇÕES</p>
+            <h2 id="results-title">Green / Red auditável</h2>
+          </div>
+          <p id="results-meta">Carregando histórico de liquidação…</p>
+        </div>
+        <div id="results" aria-live="polite"></div>
+      </section>
+
       <section class="method">
         <div><p class="kicker">COMO LER</p><h2>Transparência antes da decisão.</h2></div>
         <p>O mapa mostra todos os jogos encontrados na última varredura. As análises detalhadas exibem Tier, critérios atendidos, fonte da tabela e motivo de não qualificação. StatsBomb é histórico e agregado — não é xG ao vivo. A football-data.org confere tabela e forma por competição quando o plano cobre aquele campeonato. Dados ausentes diminuem a confiança; nunca viram sinal positivo.</p>
       </section>
     </main>
+    <dialog id="owner-dialog" class="owner-dialog" aria-labelledby="owner-dialog-title">
+      <div class="dialog-heading">
+        <div><p class="kicker">CONFIGURAÇÃO PRIVADA</p><h2 id="owner-dialog-title">Assistente de IA</h2></div>
+        <button id="owner-close" class="dialog-close" type="button" aria-label="Fechar">×</button>
+      </div>
+      <p class="dialog-copy">O acesso é exclusivo do proprietário. A chave é enviada diretamente ao Supabase por conexão segura, criptografada no banco e nunca volta para o navegador, GitHub Pages ou feed público.</p>
+      <section id="owner-auth-panel">
+        <label for="owner-email">E-mail do proprietário</label>
+        <div class="owner-auth-row"><input id="owner-email" type="email" autocomplete="email" inputmode="email" placeholder="seu@email.com"><button id="owner-link" class="refresh-button" type="button">Enviar link de acesso</button></div>
+        <p id="owner-auth-message" class="dialog-note">O link expira conforme a configuração do Supabase. Esta tela não cria uma senha.</p>
+      </section>
+      <form id="ai-settings-form" class="ai-settings" hidden>
+        <div class="settings-grid">
+          <label>Provedor<select id="ai-provider" name="provider"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="google">Google Gemini</option></select></label>
+          <label>Modelo<input id="ai-model" name="model" maxlength="160" value="gpt-4.1-mini" required></label>
+          <label class="wide">Chave da API<input id="ai-api-key" name="api-key" type="password" autocomplete="new-password" minlength="12" maxlength="4096" required placeholder="A chave fica somente no servidor"></label>
+          <label>Máx. de revisões por rotina<input id="ai-max-reviews" name="max-reviews" type="number" min="0" max="80" value="0" required></label>
+          <label class="switch"><input id="ai-enabled" name="enabled" type="checkbox"><span>Ativar revisão automática de IA</span></label>
+        </div>
+        <p id="ai-settings-status" class="dialog-note">Sem chave configurada. Defina 0 para manter a IA desligada; a análise estatística continua independente.</p>
+        <div class="dialog-actions"><button id="owner-signout" class="ghost-button" type="button">Sair</button><button class="refresh-button" type="submit">Salvar configuração segura</button></div>
+      </form>
+    </dialog>
     <script src="./config.js"></script>
     <script src="./app.js" defer></script>
   </body>

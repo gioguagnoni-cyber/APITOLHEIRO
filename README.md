@@ -4,20 +4,22 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 
 ## O que a V1 faz
 
-- Varre os jogos do dia e aprofunda o candidato prioritário por execução no plano gratuito. O limite de 10 chamadas/minuto da API-Football é respeitado com até 9 chamadas sequenciais; planos superiores podem ampliar API_FOOTBALL_MAX_REQUESTS_PER_RUN.
+- Às 23:30 BRT, varre todos os jogos do dia seguinte nas competições prioritárias já configuradas e publica um Tier 1–4 para cada jogo encontrado. A rotina reutiliza tabela e calendário da temporada por campeonato para calcular forma e mando de todos os confrontos com menos chamadas; previsões e odds entram enquanto houver orçamento seguro.
 - Mede forma nos últimos 10, recorte dos últimos 5 no mando relevante, diferença de tabela, odd de Match Winner, força do rival, baixas, escalação perto do início e um proxy de criação quando não há xG oficial.
 - Pondera sinais disponíveis. Ausência de dados reduz a confiança; não vira sinal positivo.
 - Mostra Tier 1–4. Tier 1 exige estimativa >=75%, confiança de dados >=65% e odd entre 1,30 e 2,90. Os valores alimentam o score, não são filtros rígidos para os demais tiers. A tela mantém também os Tiers não qualificados, com o motivo e os critérios que passaram ou falharam.
 - Mantém cache por endpoint, registra todas as chamadas efetivas e reserva quota atomicamente antes de chamar o provedor.
 - Sincroniza o catálogo e agregados históricos do StatsBomb Open Data em uma Edge Function separada. São guardadas métricas derivadas por partida e por equipe (xG, finalizações, passes completos e pressões), nunca o payload bruto de eventos.
-- Usa a football-data.org como conferência oficial opcional de tabela e forma por competição. São no máximo duas chamadas cacheáveis por varredura detalhada, bem abaixo do limite de 10/minuto do plano gratuito. A fonte só substitui a posição de tabela quando os dois times são associados com segurança.
+- Usa a football-data.org como conferência oficial opcional de tabela e forma por competição. São até duas chamadas cacheáveis por competição presente na varredura. A fonte só substitui a posição de tabela quando os dois times são associados com segurança.
+- Congela cada publicação pré-jogo em um snapshot imutável. Às 02:10 BRT, com novas conferências às 04:10 e 08:10, registra Green, Red ou Anulado. Para o mercado 1X2 recomendado, liquidação é pelo placar aos 90 minutos mais acréscimos — prorrogação e pênaltis não contam.
+- Oferece uma área exclusiva do proprietário para vincular OpenAI, DeepSeek ou Gemini. A chave é transmitida por HTTPS, criptografada no banco com uma chave mestra do Vault e não é exposta ao feed público, GitHub Pages, logs de UI ou repositório. A revisão de IA é opcional e tem limite explícito por publicação.
 
 ## Segurança
 
 - API-Football, football-data.org e o segredo de cron ficam no Supabase Vault; nenhum deles é enviado ao GitHub Pages, ao navegador ou ao repositório.
 - Todas as tabelas do schema public usam RLS e não têm política pública. Só o backend com service role lê e escreve.
 - As RPCs de quota e de leitura de segredo são SECURITY DEFINER com `search_path` fixo e EXECUTE revogado de PUBLIC, anon e authenticated.
-- A Edge Function `refresh-radar` só aceita `Authorization: Bearer CRON_SECRET`, enviado pelo Supabase Cron. Não há botão público que possa consumir a quota.
+- As Edge Functions `refresh-radar` e `settle-published-bets` só aceitam `Authorization: Bearer CRON_SECRET`, enviado pelo Supabase Cron. Não há botão público que possa consumir a quota.
 - A Edge Function `refresh-statsbomb-history` usa o mesmo cron protegido e não precisa de chave externa. Ela não expõe nem entrega eventos brutos do StatsBomb ao navegador.
 
 ## Entrega pública via GitHub Pages
@@ -25,7 +27,7 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 A interface pública oficial está em `docs/`, como no modelo de entrega do DASHNAVE. O GitHub Pages serve arquivos estáticos e a página consulta somente a RPC `get_public_tipster_dashboard` no Supabase.
 
 - A página não chama a API-Football, não conhece o segredo de cron e não tem acesso às tabelas operacionais.
-- O Supabase expõe somente um JSON limitado: até 32 leituras atuais em todos os Tiers e até 80 jogos da última varredura, agrupáveis por campeonato. Jogos detectados que ainda não receberam análise detalhada aparecem como “aguardando priorização”; não recebem Tier artificialmente. Cache, logs de uso, payloads do provedor e credenciais permanecem privados.
+- O Supabase expõe somente um JSON limitado: até 32 leituras atuais em todos os Tiers, até 80 jogos da última varredura e até 18 liquidações já concluídas. Cache, logs de uso, payloads do provedor, snapshots completos e credenciais permanecem privados.
 - O feed também mostra o progresso da camada StatsBomb: catálogo, partidas agregadas e perfis históricos. Esse sinal só influencia uma análise quando os dois times possuem cobertura histórica suficiente; não equivale a xG ao vivo.
 - O feed informa separadamente a cobertura da football-data.org. A UI recebe apenas status, competição e métricas já derivadas da análise — nunca token, cache bruto ou respostas privadas da API.
 - `docs/config.js` contém somente a URL do projeto e uma chave `sb_publishable`, projetada pelo Supabase para uso em navegador. A proteção está nas permissões da RPC e no contrato fixo que ela retorna.
@@ -35,22 +37,23 @@ A interface pública oficial está em `docs/`, como no modelo de entrega do DASH
 
 O frontend não requer servidor externo ou Vercel. A atualização diária é feita pela Edge Function do Supabase e pelo `pg_cron`.
 
-1. No Supabase, abra **SQL Editor** e crie os quatro valores no Vault (substitua apenas os textos entre aspas):
+1. No Supabase, abra **SQL Editor** e crie os cinco valores no Vault (substitua apenas os textos entre aspas):
 
    ```sql
    select vault.create_secret('SUA_CHAVE_API_FOOTBALL', 'apitolheiro_api_football_key');
    select vault.create_secret('SUA_CHAVE_FOOTBALL_DATA', 'apitolheiro_football_data_key');
    select vault.create_secret('SEU_CRON_SECRET', 'apitolheiro_cron_secret');
    select vault.create_secret('https://lngivvahbetcujweejim.supabase.co', 'apitolheiro_project_url');
+   select vault.create_secret('UMA_CHAVE_ALEATORIA_LONGA_E_EXCLUSIVA_PARA_CRIPTOGRAFIA', 'apitolheiro_ai_config_key');
    ```
 
-2. Avise que os valores foram registrados. Então aplique a migração `20260828011600_schedule_edge_refresh.sql` e execute uma primeira atualização autenticada para validar os dados.
+2. Em **Authentication → URL Configuration**, inclua `https://gioguagnoni-cyber.github.io/APITOLHEIRO/` em **Redirect URLs**. Isso permite que o link mágico da área privada volte à página pública correta.
 
-O job roda diariamente às 11:00 UTC (08:00 BRT). A função publicada é `refresh-radar`; ela usa as chaves internas já disponibilizadas pelo runtime do Supabase e não precisa de configuração no navegador.
+O job `refresh-radar` roda diariamente às 02:30 UTC, que corresponde a 23:30 BRT do dia anterior, e analisa o dia seguinte. `settle-published-bets` roda às 05:10, 07:10 e 11:10 UTC (02:10, 04:10 e 08:10 BRT) para liquidar publicações pendentes. Ambos usam chaves internas já disponibilizadas pelo runtime do Supabase e não precisam de configuração no navegador.
 
 O job `refresh-statsbomb-history` executa aos minutos 07 e 37 de cada hora e avança de forma incremental para evitar sobrecarga. O repositório [StatsBomb Open Data](https://github.com/hudl/open-data) é histórico e seletivo, não um feed ao vivo; publicações baseadas nesses agregados exibem a atribuição StatsBomb exigida pela fonte.
 
-O banco já possui as migrações em supabase/migrations. A aplicação usa um teto padrão de 90 chamadas/dia, propositalmente abaixo das 100 fornecidas pelo plano gratuito.
+O banco já possui as migrações em supabase/migrations. A aplicação usa até 82 chamadas de análise em uma execução, com uma margem diária para a liquidação e falhas de provedor. Se houver mais jogos do que o orçamento permite para previsões individuais, todos recebem o Tier baseado nos sinais já obtidos e a ausência é descrita nos caveats.
 
 ## Desenvolvimento
 
