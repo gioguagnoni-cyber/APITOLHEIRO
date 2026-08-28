@@ -93,6 +93,11 @@
 
   function classificationText(candidate) {
     const labels = {
+      sugerido: "Sugerido",
+      last10_insuficiente: "Não sugerido · últimos 10",
+      home_last5_insuficiente: "Não sugerido · mando",
+      tabela_insuficiente: "Não sugerido · tabela",
+      criterios_sem_cobertura: "Não sugerido · dados incompletos",
       qualificado: "Qualificado",
       cobertura_insuficiente: "Cobertura insuficiente",
       mercado_indisponivel: "Mercado indisponível",
@@ -105,6 +110,8 @@
 
   function checkValue(name, value) {
     if (value === null || value === undefined || value === "") return name === "oddsRange" ? "sem odd" : "—";
+    if (["last10", "homeLast5"].includes(name) && typeof value === "object") return `${value.observedWins ?? "—"}/${value.observedMatches ?? "—"}`;
+    if (name === "tableGap" && typeof value === "object") return value.observedPositions === null || value.observedPositions === undefined ? "—" : `${Number(value.observedPositions) >= 0 ? "+" : ""}${value.observedPositions}`;
     if (name === "coverageThreshold") return Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : "—";
     if (name === "oddsRange") return Number.isFinite(Number(value)) ? formatNumber(value, 2) : "sem odd";
     return Number.isFinite(Number(value)) ? `${formatNumber(value)}%` : "—";
@@ -113,14 +120,15 @@
   function buildChecks(candidate) {
     const checks = candidate.checks || {};
     const list = element("div", "decision-checks");
-    ["modelThreshold", "coverageThreshold", "oddsRange"].forEach((name) => {
+    const mandatory = ["last10", "homeLast5", "tableGap"].filter((name) => checks[name]);
+    (mandatory.length ? mandatory : ["modelThreshold", "coverageThreshold", "oddsRange"]).forEach((name) => {
       const check = checks[name] || {};
       const passed = check.passed === true;
       const chip = element("div", `decision-check ${passed ? "pass" : "fail"}`);
       chip.append(
         element("span", "", check.label || "Critério"),
         element("strong", "", checkValue(name, check.value)),
-        element("small", "", passed ? "atende" : "não atende"),
+        element("small", "", passed ? "regra obrigatória atendida" : "regra obrigatória não atendida"),
       );
       list.append(chip);
     });
@@ -476,7 +484,7 @@
       });
       if (!response.ok) throw new Error(`Feed indisponível (${response.status})`);
       const payload = await response.json();
-      if (!payload || payload.schemaVersion !== 5 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData || !payload.results) throw new Error("Formato de feed inválido");
+      if (!payload || payload.schemaVersion !== 6 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData || !payload.results) throw new Error("Formato de feed inválido");
       state.payload = payload;
       setSummary(payload);
       renderStatsBombSource(payload);
