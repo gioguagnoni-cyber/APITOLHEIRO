@@ -240,7 +240,7 @@
     if (!payload) return;
     const fixtures = (Array.isArray(payload.screenedFixtures) ? payload.screenedFixtures : []).filter(matchingLeague);
     screeningMeta.textContent = fixtures.length
-      ? `${fixtures.length} jogo(s) detectado(s) no recorte atual. A rotina noturna publica Tier para cada jogo prioritário; “aguardando” só aparece antes de a publicação terminar.`
+      ? `${fixtures.length} jogo(s) detectado(s) no recorte atual. Jogos priorizados recebem Tier; os demais permanecem visíveis como “fora do escopo”, sem consumir quota.`
       : "Nenhum jogo detectado para o campeonato selecionado na última varredura.";
     if (!fixtures.length) {
       screening.append(emptyState("Sem jogos no recorte.", "Altere o campeonato ou aguarde a próxima varredura cacheada.", false));
@@ -257,13 +257,17 @@
       const match = element("div", "screen-match");
       match.append(element("strong", "", `${fixture.homeName || "Mandante"} × ${fixture.awayName || "Visitante"}`));
       const kickoff = element("span", "screen-kickoff", fixture.kickoff ? ptShortDate.format(new Date(fixture.kickoff)) : "—");
-      const status = element("div", `screen-status ${fixture.analysisStatus === "analisado" ? "analyzed" : "pending"}`);
-      if (fixture.analysisStatus === "analisado") {
+      const analyzed = fixture.analysisStatus === "analisado";
+      const outOfScope = fixture.analysisStatus === "fora_de_escopo";
+      const status = element("div", `screen-status ${analyzed ? "analyzed" : "pending"}`);
+      if (analyzed) {
         status.append(element("strong", "", `Analisado · Tier ${fixture.tier}`), element("small", "", `${formatNumber(fixture.probability)}% · ${Math.round((Number(fixture.dataConfidence) || 0) * 100)}% cobertura`));
+      } else if (outOfScope) {
+        status.append(element("strong", "", "Fora do escopo"), element("small", "", "campeonato não priorizado"));
       } else {
         status.append(element("strong", "", "Aguardando publicação"), element("small", "", "rotina noturna pendente"));
       }
-      const decision = element("div", "screen-decision", fixture.analysisStatus === "analisado" ? (fixture.classificationLabel || "Analisado") : fixture.screeningReason);
+      const decision = element("div", "screen-decision", analyzed ? (fixture.classificationLabel || "Analisado") : fixture.screeningReason);
       row.append(competition, match, kickoff, status, decision);
       table.append(row);
     });
