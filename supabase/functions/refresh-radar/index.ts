@@ -855,7 +855,17 @@ const runNextDayAnalysis = async (apiKey: string, footballDataApiKey: string | n
       const standings = await client.optional<StandingsResponse[]>("standings", { league: fixture.league.id, season: fixture.league.season }, 180, apiKey);
       // A cached season payload provides form and home/away records for every
       // team in a league, avoiding two provider calls for every individual game.
-      const seasonFixtures = await client.optional<ProviderFixture[]>("fixtures", { league: fixture.league.id, season: fixture.league.season }, 360, apiKey);
+      // A current-season feed is not enough in August/early league rounds: it
+      // can contain fewer than ten completed fixtures. Combine it with the
+      // prior season once per league, then select the real latest-ten/latest-five
+      // records across the season boundary.
+      const currentSeasonFixtures = await client.optional<ProviderFixture[]>("fixtures", { league: fixture.league.id, season: fixture.league.season }, 360, apiKey);
+      const priorSeasonFixtures = fixture.league.season > 1900
+        ? await client.optional<ProviderFixture[]>("fixtures", { league: fixture.league.id, season: fixture.league.season - 1 }, 720, apiKey)
+        : null;
+      const seasonFixtures = currentSeasonFixtures || priorSeasonFixtures
+        ? [...(currentSeasonFixtures || []), ...(priorSeasonFixtures || [])]
+        : null;
       // Pre-match lineups cannot be factual the evening before. Injuries can
       // be acquired in one league/date request and are kept separate by fixture.
       const leagueInjuries = await client.optional<Injury[]>("injuries", { league: fixture.league.id, season: fixture.league.season, date: targetDate, timezone: "America/Sao_Paulo" }, 180, apiKey);
