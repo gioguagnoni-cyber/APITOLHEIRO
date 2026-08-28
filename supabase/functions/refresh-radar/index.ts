@@ -37,7 +37,7 @@ type OddsResponse = {
   fixture?: { id?: number | null } | null;
   bookmakers?: { name?: string; bets?: { name?: string; values?: { value?: string; odd?: string }[] }[] }[];
 };
-type Injury = { team?: { id?: number } };
+type Injury = { fixture?: { id?: number } | null; team?: { id?: number } | null };
 type Lineup = { team?: { id?: number }; startXI?: unknown[] };
 type StatsBombProfile = {
   team_key: string;
@@ -795,7 +795,7 @@ const runNextDayAnalysis = async (apiKey: string, footballDataApiKey: string | n
       method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ fixtures_detected: scheduled.length }),
     });
 
-    const leagueContexts = new Map<string, { positions: Map<number, number>; seasonFixtures: ProviderFixture[] | null }>();
+    const leagueContexts = new Map<string, { positions: Map<number, number>; seasonFixtures: ProviderFixture[] | null; injuriesByFixture: Map<number, Injury[]> }>();
     const representativeFixtures = new Map<string, ProviderFixture>();
     scheduled.forEach((fixture) => representativeFixtures.set(`${fixture.league.id}:${fixture.league.season}`, fixture));
     for (const [key, fixture] of representativeFixtures) {
@@ -803,7 +803,16 @@ const runNextDayAnalysis = async (apiKey: string, footballDataApiKey: string | n
       // A cached season payload provides form and home/away records for every
       // team in a league, avoiding two provider calls for every individual game.
       const seasonFixtures = await client.optional<ProviderFixture[]>("fixtures", { league: fixture.league.id, season: fixture.league.season }, 360, apiKey);
-      leagueContexts.set(key, { positions: tablePositions(standings), seasonFixtures });
+      // Pre-match lineups cannot be factual the evening before. Injuries can
+      // be acquired in one league/date request and are kept separate by fixture.
+      const leagueInjuries = await client.optional<Injury[]>("injuries", { league: fixture.league.id, season: fixture.league.season, date: targetDate, timezone: "America/Sao_Paulo" }, 180, apiKey);
+      const injuriesByFixture = new Map<number, Injury[]>();
+      (leagueInjuries || []).forEach((injury) => {
+        const fixtureId = injury.fixture?.id;
+        if (!fixtureId) return;
+        injuriesByFixture.set(fixtureId, [...(injuriesByFixture.get(fixtureId) || []), injury]);
+      });
+      leagueContexts.set(key, { positions: tablePositions(standings), seasonFixtures, injuriesByFixture });
     }
 
     const dailyOdds = await client.optional<OddsResponse[]>("odds", { date: targetDate }, 120, apiKey);
@@ -821,7 +830,7 @@ const runNextDayAnalysis = async (apiKey: string, footballDataApiKey: string | n
 
     const insights: Insight[] = [];
     for (const fixture of scheduled) {
-      const context = leagueContexts.get(`${fixture.league.id}:${fixture.league.season}`) || { positions: new Map<number, number>(), seasonFixtures: null };
+      const context = leagueContexts.get(`${fixture.league.id}:${fixture.league.season}`) || { positions: new Map<number, number>(), seasonFixtures: null, injuriesByFixture: new Map<number, Injury[]>() };
       const prediction = await client.optional<Prediction[]>("predictions", { fixture: fixture.fixture.id }, 60, apiKey);
       const footballData = await footballDataContext(officialData, footballDataApiKey, fixture);
       let insight = buildInsight(
@@ -831,7 +840,7 @@ const runNextDayAnalysis = async (apiKey: string, footballDataApiKey: string | n
         oddsByFixture.has(fixture.fixture.id) ? [oddsByFixture.get(fixture.fixture.id)!] : null,
         recentMetrics(context.seasonFixtures, fixture.teams.home.id, true),
         recentMetrics(context.seasonFixtures, fixture.teams.away.id, false),
-        null,
+        context.injuriesByFixture.get(fixture.fixture.id) || null,
         null,
         statsBombProfiles.get(normalizedTeamKey(fixture.teams.home.name)),
         statsBombProfiles.get(normalizedTeamKey(fixture.teams.away.name)),
