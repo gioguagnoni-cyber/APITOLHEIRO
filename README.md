@@ -12,10 +12,10 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 
 ## Segurança
 
-- API-Football, service role do Supabase e segredo de cron são variáveis privadas sem prefixo NEXT_PUBLIC_.
+- API-Football e o segredo de cron ficam no Supabase Vault; nenhum deles é enviado ao GitHub Pages, ao navegador ou ao repositório.
 - Todas as tabelas do schema public usam RLS e não têm política pública. Só o backend com service role lê e escreve.
-- A RPC de quota é SECURITY DEFINER com search_path fixo, validação de parâmetros e EXECUTE revogado de PUBLIC, anon e authenticated.
-- O endpoint de ingestão exige Authorization Bearer CRON_SECRET. Não há botão público de refresh que possa consumir a quota.
+- As RPCs de quota e de leitura de segredo são SECURITY DEFINER com `search_path` fixo e EXECUTE revogado de PUBLIC, anon e authenticated.
+- A Edge Function `refresh-radar` só aceita `Authorization: Bearer CRON_SECRET`, enviado pelo Supabase Cron. Não há botão público que possa consumir a quota.
 
 ## Entrega pública via GitHub Pages
 
@@ -28,21 +28,25 @@ A interface pública oficial está em `docs/`, como no modelo de entrega do DASH
 
 ## Configuração
 
-1. Copie .env.example para .env.local.
-2. Em SUPABASE_SECRET_KEY, use uma chave sb_secret do projeto Supabase apenas no ambiente do servidor. SUPABASE_SERVICE_ROLE_KEY continua aceito somente para compatibilidade com a chave legada.
-3. Em API_FOOTBALL_KEY, use uma única chave legítima da API-Sports.
-4. Defina CRON_SECRET com um valor aleatório longo no ambiente do servidor.
-5. No agendador do provedor de hospedagem escolhido, programe uma chamada diária às 11:00 UTC (08:00 BRT) para `/api/cron/refresh`, com o cabeçalho `Authorization: Bearer CRON_SECRET`.
+O frontend não requer servidor externo ou Vercel. A atualização diária é feita pela Edge Function do Supabase e pelo `pg_cron`.
+
+1. No Supabase, abra **SQL Editor** e crie os três valores no Vault (substitua apenas os textos entre aspas):
+
+   ```sql
+   select vault.create_secret('SUA_CHAVE_API_FOOTBALL', 'apitolheiro_api_football_key');
+   select vault.create_secret('SEU_CRON_SECRET', 'apitolheiro_cron_secret');
+   select vault.create_secret('https://lngivvahbetcujweejim.supabase.co', 'apitolheiro_project_url');
+   ```
+
+2. Avise que os valores foram registrados. Então aplique a migração `20260828011600_schedule_edge_refresh.sql` e execute uma primeira atualização autenticada para validar os dados.
+
+O job roda diariamente às 11:00 UTC (08:00 BRT). A função publicada é `refresh-radar`; ela usa as chaves internas já disponibilizadas pelo runtime do Supabase e não precisa de configuração no navegador.
 
 O banco já possui as migrações em supabase/migrations. A aplicação usa um teto padrão de 90 chamadas/dia, propositalmente abaixo das 100 fornecidas pelo plano gratuito.
 
 ## Desenvolvimento
 
     npm install
-    npm run dev
-    npm run typecheck
-    npm run lint
-    npm run build
     npm run test:static
 
 ## Limites de dados
