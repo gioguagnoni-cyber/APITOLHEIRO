@@ -60,6 +60,8 @@ export type FixtureInsight = {
     opponentStrength: "muito baixa" | "baixa" | "média" | "alta" | "muito alta" | "indisponível";
     xg: { value: number | null; mode: "xg" | "proxy" | "indisponível"; label: string };
     lineup: { status: "confirmada" | "pendente" | "indisponível"; unavailableCount: number | null };
+    statsbomb?: Record<string, unknown>;
+    footballData?: Record<string, unknown>;
   };
   reasons: string[];
   caveats: string[];

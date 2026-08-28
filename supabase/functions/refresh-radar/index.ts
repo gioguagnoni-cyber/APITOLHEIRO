@@ -37,6 +37,45 @@ type OddsResponse = {
 };
 type Injury = { team?: { id?: number } };
 type Lineup = { team?: { id?: number }; startXI?: unknown[] };
+type StatsBombProfile = {
+  team_key: string;
+  team_name: string;
+  matches_played: number;
+  xg_for_per_match: number;
+  xg_against_per_match: number;
+  shots_for_per_match: number;
+  shots_against_per_match: number;
+  source_updated_at: string;
+};
+type StatsBombPrior = {
+  score: number | null;
+  metrics: Record<string, unknown>;
+};
+type FootballDataStanding = {
+  position?: number;
+  team?: { id?: number; name?: string | null } | null;
+};
+type FootballDataStandingsResponse = {
+  standings?: Array<{ type?: string | null; table?: FootballDataStanding[] | null }> | null;
+};
+type FootballDataMatch = {
+  utcDate?: string | null;
+  status?: string | null;
+  homeTeam?: { id?: number; name?: string | null } | null;
+  awayTeam?: { id?: number; name?: string | null } | null;
+  score?: { fullTime?: { home?: number | null; away?: number | null } | null } | null;
+};
+type FootballDataContext = {
+  status: "confirmado" | "parcial" | "sem cobertura" | "não configurada" | "indisponível";
+  label: string;
+  competitionCode: string | null;
+  homePosition: number | null;
+  awayPosition: number | null;
+  homeRecent: RecentMetrics | null;
+  awayRecent: RecentMetrics | null;
+  score: number | null;
+  updatedAt: string | null;
+};
 
 type Insight = {
   fixtureId: number;
@@ -63,12 +102,28 @@ const MAX_REQUESTS_PER_RUN = 9;
 const MAX_DETAILED_CANDIDATES = 1;
 const PRIORITY_LEAGUES = new Set([2, 3, 39, 61, 71, 72, 73, 78, 88, 94, 128, 135, 140, 253]);
 const PROVIDER = "api-football";
+const FOOTBALL_DATA_PROVIDER = "football-data";
+const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4";
+const FOOTBALL_DATA_DAILY_LIMIT = 100;
+const FOOTBALL_DATA_MAX_REQUESTS_PER_RUN = 2;
+const FOOTBALL_DATA_COMPETITION_CODES: Record<number, string> = {
+  2: "CL", 3: "EL", 39: "PL", 61: "FL1", 71: "BSA", 78: "BL1", 88: "DED",
+  94: "PPL", 135: "SA", 140: "PD", 253: "MLS",
+};
 
 const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 const safeNumber = (value: string | number | null | undefined) => {
   const parsed = typeof value === "number" ? value : Number.parseFloat(value || "");
   return Number.isFinite(parsed) ? parsed : null;
 };
+
+const normalizedTeamKey = (name: string) => name
+  .normalize("NFD")
+  .replace(/\p{Diacritic}/gu, "")
+  .toLocaleLowerCase("en-US")
+  .replace(/[^a-z0-9]+/g, " ")
+  .trim()
+  .replace(/\s+/g, "_");
 
 const utcNow = () => new Date().toISOString();
 const usageDate = () => new Intl.DateTimeFormat("en-CA", {
@@ -123,6 +178,17 @@ const databaseRequest = async <T>(path: string, init: RequestInit = {}) => {
 
 const rpc = <T>(name: string, args: Record<string, unknown> = {}) =>
   databaseRequest<T>(`rpc/${name}`, { method: "POST", body: JSON.stringify(args) });
+
+const getStatsBombProfiles = async (teamNames: string[]) => {
+  const keys = [...new Set(teamNames.map(normalizedTeamKey).filter(Boolean))];
+  if (!keys.length) return new Map<string, StatsBombProfile>();
+  const query = new URLSearchParams({
+    select: "team_key,team_name,matches_played,xg_for_per_match,xg_against_per_match,shots_for_per_match,shots_against_per_match,source_updated_at",
+    team_key: `in.(${keys.join(",")})`,
+  });
+  const rows = await databaseRequest<StatsBombProfile[]>(`statsbomb_team_profiles?${query}`);
+  return new Map((rows || []).map((profile) => [profile.team_key, profile]));
+};
 
 const upsert = async <T extends { id: string }>(table: string, conflictColumns: string, row: Record<string, unknown>) => {
   const value = await databaseRequest<T[]>(`${table}?on_conflict=${encodeURIComponent(conflictColumns)}`, {
@@ -193,6 +259,55 @@ class ApiFootballClient {
   }
 }
 
+class FootballDataClient {
+  private requestsThisRun = 0;
+  private providerUnavailable = false;
+
+  async optional<T>(path: string, ttlMinutes: number, apiKey: string | null): Promise<T | null> {
+    if (!apiKey || this.providerUnavailable) return null;
+    const cacheKey = cacheKeyFor(path, {});
+    const cacheQuery = new URLSearchParams({
+      select: "payload,expires_at",
+      provider: `eq.${FOOTBALL_DATA_PROVIDER}`,
+      cache_key: `eq.${cacheKey}`,
+      limit: "1",
+    });
+    try {
+      const cached = await databaseRequest<{ payload: T; expires_at: string }[]>(`provider_cache?${cacheQuery}`);
+      if (cached[0] && new Date(cached[0].expires_at).getTime() > Date.now()) return cached[0].payload;
+      if (this.requestsThisRun >= FOOTBALL_DATA_MAX_REQUESTS_PER_RUN) return null;
+      const reservation = await rpc<{ allowed: boolean }[]>("reserve_api_quota", {
+        p_provider: FOOTBALL_DATA_PROVIDER,
+        p_usage_date: usageDate(),
+        p_limit: FOOTBALL_DATA_DAILY_LIMIT,
+        p_count: 1,
+      });
+      if (!reservation[0]?.allowed) return null;
+      this.requestsThisRun += 1;
+      const response = await fetch(`${FOOTBALL_DATA_BASE_URL}/${path}`, {
+        headers: { "X-Auth-Token": apiKey },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if ([401, 403, 404, 429].includes(response.status)) {
+        this.providerUnavailable = true;
+        return null;
+      }
+      if (!response.ok) throw new Error(`football-data.org returned HTTP ${response.status}.`);
+      const payload = await response.json() as T;
+      const expiresAt = new Date(Date.now() + ttlMinutes * 60_000).toISOString();
+      await databaseRequest("provider_cache?on_conflict=provider,cache_key", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ provider: FOOTBALL_DATA_PROVIDER, cache_key: cacheKey, payload, fetched_at: utcNow(), expires_at: expiresAt }),
+      });
+      return payload;
+    } catch (error) {
+      console.warn("Optional football-data.org input unavailable", { path, message: error instanceof Error ? error.message : "Unknown" });
+      return null;
+    }
+  }
+}
+
 const fixtureResult = (fixture: ProviderFixture, teamId: number) => {
   const isHome = fixture.teams.home.id === teamId;
   const team = isHome ? fixture.teams.home : fixture.teams.away;
@@ -237,6 +352,88 @@ const venueMetrics = (metrics: RecentMetrics | null): RecentMetrics | null => me
 const tablePositions = (payload: StandingsResponse[] | null) => new Map(
   (payload?.flatMap((item) => item.league?.standings?.flat() || []) || []).map((standing) => [standing.team.id, standing.rank]),
 );
+
+const comparableTeamName = (name: string) => normalizedTeamKey(name)
+  .split("_")
+  .filter((token) => !["fc", "cf", "sc", "ac", "afc", "the", "club", "de", "do", "da", "esporte"].includes(token))
+  .join("_");
+
+const sameTeam = (left: string | null | undefined, right: string) => {
+  const a = comparableTeamName(left || "");
+  const b = comparableTeamName(right);
+  return Boolean(a && b && (a === b || a.startsWith(`${b}_`) || b.startsWith(`${a}_`)));
+};
+
+const footballDataTable = (payload: FootballDataStandingsResponse | null) =>
+  payload?.standings?.find((standing) => standing.type === "TOTAL")?.table
+  || payload?.standings?.[0]?.table
+  || [];
+
+const footballDataPosition = (table: FootballDataStanding[], teamName: string) =>
+  table.find((standing) => sameTeam(standing.team?.name, teamName))?.position || null;
+
+const footballDataRecent = (matches: FootballDataMatch[] | null, teamName: string, upcomingIsHome: boolean): RecentMetrics | null => {
+  if (!matches?.length) return null;
+  const complete = matches
+    .filter((match) => match.status === "FINISHED")
+    .sort((left, right) => new Date(right.utcDate || 0).getTime() - new Date(left.utcDate || 0).getTime());
+  const toResult = (match: FootballDataMatch) => {
+    const isHome = sameTeam(match.homeTeam?.name, teamName);
+    const goalsFor = isHome ? match.score?.fullTime?.home : match.score?.fullTime?.away;
+    const goalsAgainst = isHome ? match.score?.fullTime?.away : match.score?.fullTime?.home;
+    const safeFor = typeof goalsFor === "number" ? goalsFor : 0;
+    const safeAgainst = typeof goalsAgainst === "number" ? goalsAgainst : 0;
+    return { isHome, goalsFor: safeFor, goalsAgainst: safeAgainst, decided: safeFor > safeAgainst ? "win" : safeFor < safeAgainst ? "loss" : "draw" };
+  };
+  const teamMatches = complete.filter((match) => sameTeam(match.homeTeam?.name, teamName) || sameTeam(match.awayTeam?.name, teamName));
+  const all = teamMatches.slice(0, 10).map(toResult);
+  const venue = teamMatches.filter((match) => toResult(match).isHome === upcomingIsHome).slice(0, 5).map(toResult);
+  const summary = (items: ReturnType<typeof toResult>[]) => ({
+    wins: items.filter((item) => item.decided === "win").length,
+    draws: items.filter((item) => item.decided === "draw").length,
+    losses: items.filter((item) => item.decided === "loss").length,
+    goalsFor: items.reduce((total, item) => total + item.goalsFor, 0),
+    goalsAgainst: items.reduce((total, item) => total + item.goalsAgainst, 0),
+  });
+  const aggregate = summary(all);
+  const venueAggregate = summary(venue);
+  return all.length ? {
+    total: all.length, ...aggregate, venueTotal: venue.length, venueWins: venueAggregate.wins, unavailable: false,
+  } : null;
+};
+
+const footballDataContext = async (client: FootballDataClient, apiKey: string | null, fixture: ProviderFixture): Promise<FootballDataContext> => {
+  const competitionCode = FOOTBALL_DATA_COMPETITION_CODES[fixture.league.id] || null;
+  if (!apiKey) return {
+    status: "não configurada", label: "Chave server-side ainda não registrada no Vault", competitionCode,
+    homePosition: null, awayPosition: null, homeRecent: null, awayRecent: null, score: null, updatedAt: null,
+  };
+  if (!competitionCode) return {
+    status: "sem cobertura", label: "Competição sem mapeamento seguro na fonte oficial", competitionCode: null,
+    homePosition: null, awayPosition: null, homeRecent: null, awayRecent: null, score: null, updatedAt: null,
+  };
+  const standings = await client.optional<FootballDataStandingsResponse>(`competitions/${competitionCode}/standings`, 90, apiKey);
+  if (!standings) return {
+    status: "indisponível", label: "Cobertura não disponível no plano ou na janela de consulta", competitionCode,
+    homePosition: null, awayPosition: null, homeRecent: null, awayRecent: null, score: null, updatedAt: null,
+  };
+  const table = footballDataTable(standings);
+  const homePosition = footballDataPosition(table, fixture.teams.home.name);
+  const awayPosition = footballDataPosition(table, fixture.teams.away.name);
+  const matches = await client.optional<FootballDataMatch[]>(`competitions/${competitionCode}/matches?status=FINISHED&limit=100`, 180, apiKey);
+  const homeRecent = footballDataRecent(matches, fixture.teams.home.name, true);
+  const awayRecent = footballDataRecent(matches, fixture.teams.away.name, false);
+  const hasTable = homePosition !== null && awayPosition !== null;
+  const hasForm = homeRecent?.total && awayRecent?.total;
+  const score = hasTable && hasForm
+    ? clamp(0.62 - Math.abs((homeRecent.wins / homeRecent.total) - (awayRecent.wins / awayRecent.total)) * 0.2)
+    : null;
+  return {
+    status: hasTable && hasForm ? "confirmado" : "parcial",
+    label: hasTable ? "Tabela oficial e forma recente por competição" : "Times não puderam ser associados com segurança à tabela oficial",
+    competitionCode, homePosition, awayPosition, homeRecent, awayRecent, score, updatedAt: utcNow(),
+  };
+};
 
 const findOdds = (payload: OddsResponse[] | null, favorite: "home" | "away") => {
   const wanted = favorite === "home" ? ["Home", "1"] : ["Away", "2"];
@@ -286,6 +483,38 @@ const predictedGoalDifference = (prediction: Prediction[] | null, favorite: "hom
   return favorite === "home" ? home - away : away - home;
 };
 
+const statsBombPrior = (favorite: StatsBombProfile | undefined, opponent: StatsBombProfile | undefined): StatsBombPrior => {
+  const favoriteMatches = safeNumber(favorite?.matches_played) || 0;
+  const opponentMatches = safeNumber(opponent?.matches_played) || 0;
+  if (!favorite) {
+    return { score: null, metrics: { status: "sem cobertura", label: "Sem perfil histórico correspondente" } };
+  }
+  const favoriteXgFor = safeNumber(favorite.xg_for_per_match);
+  const favoriteXgAgainst = safeNumber(favorite.xg_against_per_match);
+  const opponentXgFor = safeNumber(opponent?.xg_for_per_match);
+  const opponentXgAgainst = safeNumber(opponent?.xg_against_per_match);
+  const metrics = {
+    status: opponent && favoriteMatches >= 3 && opponentMatches >= 3 ? "histórico" : "parcial",
+    label: opponent ? "Perfil histórico agregado" : "Somente o favorito possui perfil histórico",
+    favoriteMatches,
+    opponentMatches,
+    xgForPerMatch: favoriteXgFor,
+    xgAgainstPerMatch: favoriteXgAgainst,
+    shotsForPerMatch: safeNumber(favorite.shots_for_per_match),
+    sourceUpdatedAt: favorite.source_updated_at,
+  };
+  if (favoriteXgFor === null || favoriteXgAgainst === null || opponentXgFor === null || opponentXgAgainst === null || favoriteMatches < 3 || opponentMatches < 3) {
+    return { score: null, metrics };
+  }
+  const expectedFor = (favoriteXgFor + opponentXgAgainst) / 2;
+  const expectedAgainst = (favoriteXgAgainst + opponentXgFor) / 2;
+  const difference = expectedFor - expectedAgainst;
+  return {
+    score: clamp(0.5 + difference / 3),
+    metrics: { ...metrics, expectedDifferential: Math.round(difference * 100) / 100 },
+  };
+};
+
 const chooseFavorite = (fixture: ProviderFixture, prediction: Prediction[] | null, homePosition: number | null, awayPosition: number | null, homeRecent: RecentMetrics | null, awayRecent: RecentMetrics | null) => {
   const winner = prediction?.[0]?.predictions?.winner?.id;
   if (winner === fixture.teams.home.id) return "home" as const;
@@ -296,13 +525,17 @@ const chooseFavorite = (fixture: ProviderFixture, prediction: Prediction[] | nul
   return homeRate >= awayRate ? "home" as const : "away" as const;
 };
 
-const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, prediction: Prediction[] | null, oddsPayload: OddsResponse[] | null, homeRecent: RecentMetrics | null, awayRecent: RecentMetrics | null, injuries: Injury[] | null, lineups: Lineup[] | null): Insight => {
-  const homePosition = positions.get(fixture.teams.home.id) || null;
-  const awayPosition = positions.get(fixture.teams.away.id) || null;
-  const favorite = chooseFavorite(fixture, prediction, homePosition, awayPosition, homeRecent, awayRecent);
+const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, prediction: Prediction[] | null, oddsPayload: OddsResponse[] | null, homeRecent: RecentMetrics | null, awayRecent: RecentMetrics | null, injuries: Injury[] | null, lineups: Lineup[] | null, homeStatsBomb: StatsBombProfile | undefined, awayStatsBomb: StatsBombProfile | undefined, footballData: FootballDataContext): Insight => {
+  const apiHomePosition = positions.get(fixture.teams.home.id) || null;
+  const apiAwayPosition = positions.get(fixture.teams.away.id) || null;
+  const homePosition = footballData.homePosition ?? apiHomePosition;
+  const awayPosition = footballData.awayPosition ?? apiAwayPosition;
+  const resolvedHomeRecent = homeRecent ?? footballData.homeRecent;
+  const resolvedAwayRecent = awayRecent ?? footballData.awayRecent;
+  const favorite = chooseFavorite(fixture, prediction, homePosition, awayPosition, resolvedHomeRecent, resolvedAwayRecent);
   const favoriteTeam = favorite === "home" ? fixture.teams.home : fixture.teams.away;
   const opponentTeam = favorite === "home" ? fixture.teams.away : fixture.teams.home;
-  const favoriteRecent = favorite === "home" ? homeRecent : awayRecent;
+  const favoriteRecent = favorite === "home" ? resolvedHomeRecent : resolvedAwayRecent;
   const favoritePosition = favorite === "home" ? homePosition : awayPosition;
   const opponentPosition = favorite === "home" ? awayPosition : homePosition;
   const favoriteInjuries = (injuries || []).filter((injury) => injury.team?.id === favoriteTeam.id).length;
@@ -321,9 +554,11 @@ const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, 
   const observedGoalDifference = favoriteRecent?.total ? (favoriteRecent.goalsFor - favoriteRecent.goalsAgainst) / favoriteRecent.total : null;
   const xgProxy = predictedGoalDifference(prediction, favorite) ?? observedGoalDifference;
   const xgScore = xgProxy === null ? null : clamp(0.5 + xgProxy / 3);
+  const historicalPrior = statsBombPrior(favorite === "home" ? homeStatsBomb : awayStatsBomb, favorite === "home" ? awayStatsBomb : homeStatsBomb);
   const inputs: Array<[number | null, number]> = [
-    [predictionProbability === null ? null : predictionProbability / 100, 0.24], [formRate, 0.18], [venueRate, 0.11],
-    [tableScore, 0.16], [marketProbability, 0.08], [injuryScore, 0.07], [lineupScore, 0.07], [xgScore, 0.09],
+    [predictionProbability === null ? null : predictionProbability / 100, 0.22], [formRate, 0.18], [venueRate, 0.11],
+    [tableScore, 0.16], [marketProbability, 0.08], [injuryScore, 0.07], [lineupScore, 0.07], [xgScore, 0.06], [historicalPrior.score, 0.03],
+    [footballData.score, 0.02],
   ];
   const availableWeight = inputs.reduce((total, [value, weight]) => total + (value === null ? 0 : weight), 0);
   const dataScore = inputs.reduce((total, [value, weight]) => total + (value === null ? 0 : value * weight), 0);
@@ -352,6 +587,18 @@ const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, 
       opponentStrength: strengthLabel(opponentPosition),
       xg: { value: xgProxy === null ? null : Math.round(xgProxy * 100) / 100, mode: xgProxy === null ? "indisponível" : "proxy", label: xgProxy === null ? "Sem xG ou proxy disponível" : "Proxy de criação recente" },
       lineup: { status: lineupStatus, unavailableCount: injuries ? favoriteInjuries : null },
+      statsbomb: historicalPrior.metrics,
+      footballData: {
+        status: footballData.status,
+        label: footballData.label,
+        competitionCode: footballData.competitionCode,
+        tableSource: footballData.homePosition !== null && footballData.awayPosition !== null ? "football-data.org" : "API-Football",
+        homePosition: footballData.homePosition,
+        awayPosition: footballData.awayPosition,
+        favoriteRecentMatches: favorite === "home" ? footballData.homeRecent?.total || null : footballData.awayRecent?.total || null,
+        verificationScore: footballData.score,
+        updatedAt: footballData.updatedAt,
+      },
     },
     reasons: [
       formRate !== null ? `Forma recente: ${favoriteRecent?.wins} vitórias nos últimos ${favoriteRecent?.total}.` : null,
@@ -359,11 +606,15 @@ const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, 
       tableGap !== null ? `Diferença de tabela: ${tableGap >= 0 ? "+" : ""}${tableGap} posições.` : null,
       odds ? `Odd observada: ${odds.toFixed(2)}.` : null,
       predictionProbability !== null ? `Previsão externa usada como um dos sinais: ${predictionProbability}%.` : null,
+      historicalPrior.score !== null ? `Base histórica StatsBomb: ${historicalPrior.metrics.xgForPerMatch} xG por jogo em ${historicalPrior.metrics.favoriteMatches} partidas agregadas.` : null,
+      footballData.status === "confirmado" ? `Tabela e forma na competição confirmadas pela football-data.org (${footballData.competitionCode}).` : null,
     ].filter((value): value is string => Boolean(value)),
     caveats: [
       xgProxy === null ? "xG indisponível; o modelo não inventa esse indicador." : "Indicador de criação em modo proxy; não equivale a xG oficial.",
       lineupStatus !== "confirmada" ? "Escalação ainda não confirmada." : null,
       oddsInRange ? null : "Odd fora da faixa operacional de 1,30–2,90 ou indisponível.",
+      historicalPrior.score !== null ? "StatsBomb é base histórica seletiva; não é dado ao vivo nem confirmação de escalação." : null,
+      ["sem cobertura", "indisponível", "não configurada"].includes(footballData.status) ? `football-data.org: ${footballData.label}.` : null,
     ].filter((value): value is string => Boolean(value)),
   };
 };
@@ -381,7 +632,7 @@ const persistInsight = async (fixture: ProviderFixture, insight: Insight) => {
     venue_name: fixture.fixture.venue?.name || null,
   });
   await upsert<{ id: string }>("fixture_analyses", "fixture_id", {
-    fixture_id: savedFixture.id, model_version: "v1.0", probability: insight.probability, confidence: insight.dataConfidence,
+    fixture_id: savedFixture.id, model_version: "v1.2", probability: insight.probability, confidence: insight.dataConfidence,
     model_score: insight.score, tier: insight.tier, eligible: insight.eligible, favorite_side: insight.favorite,
     recommended_market: insight.recommendedMarket, bookmaker: insight.bookmaker, odds: insight.odds,
     implied_probability: insight.impliedProbability, metrics: insight.metrics, reasons: insight.reasons, caveats: insight.caveats,
@@ -389,7 +640,7 @@ const persistInsight = async (fixture: ProviderFixture, insight: Insight) => {
   });
 };
 
-const runDailyAnalysis = async (apiKey: string) => {
+const runDailyAnalysis = async (apiKey: string, footballDataApiKey: string | null) => {
   const run = await databaseRequest<{ id: string }[]>("ingestion_runs", {
     method: "POST", headers: { Prefer: "return=representation" },
     body: JSON.stringify({ provider: PROVIDER, run_type: "daily_analysis", started_at: utcNow(), status: "running" }),
@@ -397,6 +648,7 @@ const runDailyAnalysis = async (apiKey: string) => {
   const runId = run[0]?.id;
   if (!runId) throw new Error("Could not start the ingestion audit record.");
   const client = new ApiFootballClient();
+  const officialData = new FootballDataClient();
   try {
     const fixtures = await client.get<ProviderFixture[]>("fixtures", { date: usageDate(), timezone: "America/Sao_Paulo" }, 20, apiKey);
     const scheduled = fixtures.filter((fixture) => ["NS", "TBD"].includes(fixture.fixture.status.short) && new Date(fixture.fixture.date).getTime() >= Date.now() - 15 * 60_000)
@@ -411,7 +663,26 @@ const runDailyAnalysis = async (apiKey: string) => {
       const awayFixtures = await client.optional<ProviderFixture[]>("fixtures", { team: fixture.teams.away.id, last: 20 }, 360, apiKey);
       const injuries = await client.optional<Injury[]>("injuries", { fixture: fixture.fixture.id }, 240, apiKey);
       const lineups = isKickoffNear(fixture.fixture.date) ? await client.optional<Lineup[]>("fixtures/lineups", { fixture: fixture.fixture.id }, 15, apiKey) : null;
-      const insight = buildInsight(fixture, tablePositions(standings), prediction, odds, recentMetrics(homeFixtures, fixture.teams.home.id, true), recentMetrics(awayFixtures, fixture.teams.away.id, false), injuries, lineups);
+      let statsBombProfiles = new Map<string, StatsBombProfile>();
+      try {
+        statsBombProfiles = await getStatsBombProfiles([fixture.teams.home.name, fixture.teams.away.name]);
+      } catch (error) {
+        console.warn("Optional StatsBomb prior unavailable", { message: error instanceof Error ? error.message : "Unknown error" });
+      }
+      const footballData = await footballDataContext(officialData, footballDataApiKey, fixture);
+      const insight = buildInsight(
+        fixture,
+        tablePositions(standings),
+        prediction,
+        odds,
+        recentMetrics(homeFixtures, fixture.teams.home.id, true),
+        recentMetrics(awayFixtures, fixture.teams.away.id, false),
+        injuries,
+        lineups,
+        statsBombProfiles.get(normalizedTeamKey(fixture.teams.home.name)),
+        statsBombProfiles.get(normalizedTeamKey(fixture.teams.away.name)),
+        footballData,
+      );
       await persistInsight(fixture, insight);
       insights.push(insight);
     }
@@ -438,7 +709,8 @@ Deno.serve(async (request) => {
     if (!refreshSecret || !constantTimeEquals(received, refreshSecret)) return Response.json({ error: "Unauthorized." }, { status: 401 });
     const apiKey = await rpc<string | null>("get_api_football_key");
     if (!apiKey) return Response.json({ error: "API-Football is not configured." }, { status: 503 });
-    const candidates = await runDailyAnalysis(apiKey);
+    const footballDataApiKey = await rpc<string | null>("get_football_data_key");
+    const candidates = await runDailyAnalysis(apiKey, footballDataApiKey);
     return Response.json({ ok: true, analyzed: candidates.length, generatedAt: utcNow() });
   } catch (error) {
     console.error("APITOLHEIRO refresh failed", error instanceof Error ? error.message : "Unknown error");

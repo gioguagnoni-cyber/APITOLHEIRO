@@ -6,6 +6,10 @@
   const dashboard = document.querySelector("#dashboard");
   const screening = document.querySelector("#screening");
   const screeningMeta = document.querySelector("#screening-meta");
+  const statsbombSource = document.querySelector("#statsbomb-source");
+  const statsbombStatus = document.querySelector("#statsbomb-status");
+  const footballDataSource = document.querySelector("#football-data-source");
+  const footballDataStatus = document.querySelector("#football-data-status");
   const refreshButton = document.querySelector("#refresh-button");
   const leagueFilter = document.querySelector("#league-filter");
   const tierButtons = [...document.querySelectorAll("[data-tier]")];
@@ -111,6 +115,22 @@
     const favoriteIsHome = candidate.favorite === "home";
     const xg = metrics.xg || {};
     const lineup = metrics.lineup || {};
+    const statsbomb = metrics.statsbomb || {};
+    const footballData = metrics.footballData || {};
+    const statsbombAvailable = statsbomb.status === "histórico";
+    const statsbombValue = statsbombAvailable && Number.isFinite(Number(statsbomb.xgForPerMatch))
+      ? `${formatNumber(statsbomb.xgForPerMatch, 2)} xG`
+      : (statsbomb.status || "sem cobertura");
+    const statsbombCaption = statsbombAvailable
+      ? `${statsbomb.favoriteMatches || 0} partidas históricas`
+      : (statsbomb.label || "não entra no score");
+    const footballDataVerified = footballData.status === "confirmado";
+    const footballDataValue = footballDataVerified
+      ? `Tabela ${footballData.tableSource || "oficial"}`
+      : (footballData.status || "sem cobertura");
+    const footballDataCaption = footballDataVerified
+      ? `${footballData.competitionCode || "competição"} · ${footballData.favoriteRecentMatches || 0} jogos recentes`
+      : (footballData.label || "não altera o score");
     const article = element("article", `candidate-card tier-${candidate.tier}`);
 
     const top = element("div", "card-topline");
@@ -149,6 +169,8 @@
       labelValue("Força rival", metrics.opponentStrength || "indisponível", "proxy de tabela", strengthTone(metrics.opponentStrength)),
       labelValue(xg.mode === "xg" ? "xG diferencial" : "Criação", xg.value === null || xg.value === undefined ? "—" : `${Number(xg.value) > 0 ? "+" : ""}${formatNumber(xg.value, 2)}`, xg.mode === "proxy" ? "proxy de criação" : (xg.mode || "indisponível")),
       labelValue("Escalação", lineup.status || "indisponível", lineup.unavailableCount === null || lineup.unavailableCount === undefined ? "baixas indisponíveis" : `${lineup.unavailableCount} baixas listadas`),
+      labelValue("StatsBomb", statsbombValue, statsbombCaption, statsbombAvailable ? "positive" : ""),
+      labelValue("football-data.org", footballDataValue, footballDataCaption, footballDataVerified ? "positive" : ""),
     );
 
     const footer = element("div", "card-footer");
@@ -275,6 +297,29 @@
     });
   }
 
+  function renderStatsBombSource(payload) {
+    const source = payload.statsbomb || {};
+    const aggregated = Number(source.matchesAggregated) || 0;
+    const discovered = Number(source.matchesDiscovered) || 0;
+    const profiles = Number(source.teamProfiles) || 0;
+    const coverage = aggregated
+      ? `${aggregated} partidas agregadas · ${profiles} perfis de equipe. O sinal só entra quando os dois times têm cobertura histórica suficiente.`
+      : "Catálogo histórico em sincronização. Até existir cobertura dos dois times, este sinal não altera a probabilidade.";
+    statsbombStatus.textContent = `${source.mode || "histórico seletivo"} · ${aggregated}/${discovered || "—"} partidas processadas. ${coverage}`;
+    statsbombSource.classList.toggle("ready", aggregated > 0);
+  }
+
+  function renderFootballDataSource(payload) {
+    const source = payload.footballData || {};
+    const verified = Number(source.verifiedAnalyses) || 0;
+    const partial = Number(source.partialAnalyses) || 0;
+    const coverage = verified
+      ? `${verified} análise(s) com tabela e forma confirmadas; ${partial} parcial(is).`
+      : "A fonte será aplicada apenas a competições mapeadas e cobertas pelo plano; nenhuma chave ou resposta bruta é exposta aqui.";
+    footballDataStatus.textContent = `${source.mode || "tabela e forma por competição"} · ${coverage}`;
+    footballDataSource.classList.toggle("ready", verified > 0);
+  }
+
   async function load() {
     if (!config?.supabaseUrl || !config?.publishableKey) {
       dashboard.replaceChildren(emptyState("Configuração pública ausente.", "A página não encontrou o contrato do Supabase.", true));
@@ -296,9 +341,11 @@
       });
       if (!response.ok) throw new Error(`Feed indisponível (${response.status})`);
       const payload = await response.json();
-      if (!payload || payload.schemaVersion !== 2 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures)) throw new Error("Formato de feed inválido");
+      if (!payload || payload.schemaVersion !== 4 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData) throw new Error("Formato de feed inválido");
       state.payload = payload;
       setSummary(payload);
+      renderStatsBombSource(payload);
+      renderFootballDataSource(payload);
       syncLeagueOptions(payload);
       render();
     } catch (error) {
