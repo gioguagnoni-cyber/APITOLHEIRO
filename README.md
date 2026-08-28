@@ -4,10 +4,10 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 
 ## O que a V1 faz
 
-- Varre os jogos do dia e aprofunda o candidato prioritário por execução no plano gratuito. O limite de 10 chamadas/minuto da API-Football é respeitado com até 9 chamadas sequenciais; planos superiores podem ampliar API_FOOTBALL_MAX_REQUESTS_PER_RUN. O painel só publica análises com ao menos 65% de cobertura dos sinais.
+- Varre os jogos do dia e aprofunda o candidato prioritário por execução no plano gratuito. O limite de 10 chamadas/minuto da API-Football é respeitado com até 9 chamadas sequenciais; planos superiores podem ampliar API_FOOTBALL_MAX_REQUESTS_PER_RUN.
 - Mede forma nos últimos 10, recorte dos últimos 5 no mando relevante, diferença de tabela, odd de Match Winner, força do rival, baixas, escalação perto do início e um proxy de criação quando não há xG oficial.
 - Pondera sinais disponíveis. Ausência de dados reduz a confiança; não vira sinal positivo.
-- Mostra Tier 1–4. Tier 1 exige estimativa >=75%, confiança de dados >=65% e odd entre 1,30 e 2,90. Os valores alimentam o score, não são filtros rígidos para os demais tiers.
+- Mostra Tier 1–4. Tier 1 exige estimativa >=75%, confiança de dados >=65% e odd entre 1,30 e 2,90. Os valores alimentam o score, não são filtros rígidos para os demais tiers. A tela mantém também os Tiers não qualificados, com o motivo e os critérios que passaram ou falharam.
 - Mantém cache por endpoint, registra todas as chamadas efetivas e reserva quota atomicamente antes de chamar o provedor.
 
 ## Segurança
@@ -22,7 +22,7 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 A interface pública oficial está em `docs/`, como no modelo de entrega do DASHNAVE. O GitHub Pages serve arquivos estáticos e a página consulta somente a RPC `get_public_tipster_dashboard` no Supabase.
 
 - A página não chama a API-Football, não conhece o segredo de cron e não tem acesso às tabelas operacionais.
-- O Supabase expõe apenas um JSON limitado a 32 leituras atuais com cobertura mínima de dados. Cache, logs de uso, payloads do provedor e credenciais permanecem privados.
+- O Supabase expõe somente um JSON limitado: até 32 leituras atuais em todos os Tiers e até 80 jogos da última varredura, agrupáveis por campeonato. Jogos detectados que ainda não receberam análise detalhada aparecem como “aguardando priorização”; não recebem Tier artificialmente. Cache, logs de uso, payloads do provedor e credenciais permanecem privados.
 - `docs/config.js` contém somente a URL do projeto e uma chave `sb_publishable`, projetada pelo Supabase para uso em navegador. A proteção está nas permissões da RPC e no contrato fixo que ela retorna.
 - Configure GitHub Pages para publicar a branch `main`, pasta `/docs`. A URL esperada é `https://gioguagnoni-cyber.github.io/APITOLHEIRO/`.
 

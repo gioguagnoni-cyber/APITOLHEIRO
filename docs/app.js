@@ -2,14 +2,18 @@
   "use strict";
 
   const config = window.APITOLHEIRO_PUBLIC_CONFIG;
-  const state = { payload: null, tier: "all" };
+  const state = { payload: null, tier: "all", league: "all" };
   const dashboard = document.querySelector("#dashboard");
+  const screening = document.querySelector("#screening");
+  const screeningMeta = document.querySelector("#screening-meta");
   const refreshButton = document.querySelector("#refresh-button");
+  const leagueFilter = document.querySelector("#league-filter");
   const tierButtons = [...document.querySelectorAll("[data-tier]")];
   const numbers = {
+    screened: document.querySelector("#screened-count"),
     analyzed: document.querySelector("#analyzed-count"),
     verified: document.querySelector("#verified-count"),
-    tierOne: document.querySelector("#tier-one-count"),
+    qualified: document.querySelector("#qualified-count"),
     updated: document.querySelector("#source-updated"),
   };
 
@@ -56,6 +60,49 @@
     return Number.isFinite(numeric) ? numeric.toFixed(digits) : "—";
   }
 
+  function leagueKey(item) {
+    return `${item.country || "Internacional"}::${item.league || "Competição"}`;
+  }
+
+  function leagueLabel(item) {
+    return `${item.league || "Competição"} · ${item.country || "Internacional"}`;
+  }
+
+  function classificationText(candidate) {
+    const labels = {
+      qualificado: "Qualificado",
+      cobertura_insuficiente: "Cobertura insuficiente",
+      mercado_indisponivel: "Mercado indisponível",
+      odd_fora_da_faixa: "Odd fora da faixa",
+      probabilidade_abaixo_meta: "Abaixo da meta",
+      monitorar: "Monitorar",
+    };
+    return labels[candidate.classification] || "Analisado";
+  }
+
+  function checkValue(name, value) {
+    if (name === "coverageThreshold") return Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : "—";
+    if (name === "oddsRange") return Number.isFinite(Number(value)) ? formatNumber(value, 2) : "sem odd";
+    return Number.isFinite(Number(value)) ? `${formatNumber(value)}%` : "—";
+  }
+
+  function buildChecks(candidate) {
+    const checks = candidate.checks || {};
+    const list = element("div", "decision-checks");
+    ["modelThreshold", "coverageThreshold", "oddsRange"].forEach((name) => {
+      const check = checks[name] || {};
+      const passed = check.passed === true;
+      const chip = element("div", `decision-check ${passed ? "pass" : "fail"}`);
+      chip.append(
+        element("span", "", check.label || "Critério"),
+        element("strong", "", checkValue(name, check.value)),
+        element("small", "", passed ? "atende" : "não atende"),
+      );
+      list.append(chip);
+    });
+    return list;
+  }
+
   function buildCandidate(candidate) {
     const metrics = candidate.metrics || {};
     const last10 = record(metrics.last10, false);
@@ -67,7 +114,7 @@
 
     const top = element("div", "card-topline");
     top.append(
-      element("span", "", `${candidate.country || "Internacional"} · ${candidate.league || "Competição"}`),
+      element("span", "", leagueLabel(candidate)),
       element("span", "", candidate.kickoff ? ptDate.format(new Date(candidate.kickoff)) : "horário indisponível"),
     );
 
@@ -89,6 +136,9 @@
     const probability = element("div", "probability");
     probability.append(element("span", "", `${formatNumber(candidate.probability)}%`), element("small", "", "probabilidade do modelo"));
     recommendation.append(favorite, probability, element("div", `tier-badge tier-${candidate.tier}`, `Tier ${candidate.tier}`));
+
+    const classification = element("div", `classification ${candidate.eligible ? "qualified" : "not-qualified"}`);
+    classification.append(element("strong", "", classificationText(candidate)), element("span", "", candidate.classificationLabel || "Sem justificativa disponível."));
 
     const signals = element("div", "signal-grid");
     signals.append(
@@ -119,7 +169,7 @@
     const notes = element("div", "card-notes");
     (Array.isArray(candidate.reasons) ? candidate.reasons : []).slice(0, 2).forEach((reason) => notes.append(element("span", "reason", `+ ${reason}`)));
     (Array.isArray(candidate.caveats) ? candidate.caveats : []).slice(0, 2).forEach((caveat) => notes.append(element("span", "caveat", `! ${caveat}`)));
-    article.append(top, heading, recommendation, signals, footer, notes);
+    article.append(top, heading, recommendation, classification, buildChecks(candidate), signals, footer, notes);
     return article;
   }
 
@@ -130,33 +180,98 @@
     return box;
   }
 
+  function matchingLeague(item) {
+    return state.league === "all" || leagueKey(item) === state.league;
+  }
+
+  function renderScreening() {
+    screening.replaceChildren();
+    const payload = state.payload;
+    if (!payload) return;
+    const fixtures = (Array.isArray(payload.screenedFixtures) ? payload.screenedFixtures : []).filter(matchingLeague);
+    screeningMeta.textContent = fixtures.length
+      ? `${fixtures.length} jogo(s) detectado(s) no recorte atual. “Aguardando detalhamento” significa que não houve consumo adicional de API naquele jogo.`
+      : "Nenhum jogo detectado para o campeonato selecionado na última varredura.";
+    if (!fixtures.length) {
+      screening.append(emptyState("Sem jogos no recorte.", "Altere o campeonato ou aguarde a próxima varredura cacheada.", false));
+      return;
+    }
+    const table = element("div", "screen-table");
+    const header = element("div", "screen-row screen-head");
+    ["Campeonato", "Jogo", "Horário", "Situação", "Decisão"].forEach((label) => header.append(element("span", "", label)));
+    table.append(header);
+    fixtures.forEach((fixture) => {
+      const row = element("div", "screen-row");
+      const competition = element("div", "screen-competition");
+      competition.append(element("strong", "", fixture.league || "Competição"), element("small", "", fixture.country || "Internacional"));
+      const match = element("div", "screen-match");
+      match.append(element("strong", "", `${fixture.homeName || "Mandante"} × ${fixture.awayName || "Visitante"}`));
+      const kickoff = element("span", "screen-kickoff", fixture.kickoff ? ptShortDate.format(new Date(fixture.kickoff)) : "—");
+      const status = element("div", `screen-status ${fixture.analysisStatus === "analisado" ? "analyzed" : "pending"}`);
+      if (fixture.analysisStatus === "analisado") {
+        status.append(element("strong", "", `Analisado · Tier ${fixture.tier}`), element("small", "", `${formatNumber(fixture.probability)}% · ${Math.round((Number(fixture.dataConfidence) || 0) * 100)}% cobertura`));
+      } else {
+        status.append(element("strong", "", "Aguardando detalhamento"), element("small", "", "priorização por quota"));
+      }
+      const decision = element("div", "screen-decision", fixture.analysisStatus === "analisado" ? (fixture.classificationLabel || "Analisado") : fixture.screeningReason);
+      row.append(competition, match, kickoff, status, decision);
+      table.append(row);
+    });
+    screening.append(table);
+  }
+
   function render() {
     dashboard.replaceChildren();
     const payload = state.payload;
     if (!payload) {
-      dashboard.append(emptyState("Ainda não há leitura para exibir.", "O feed público não retornou uma análise verificável.", false));
+      dashboard.append(emptyState("Ainda não há leitura para exibir.", "O feed público não retornou uma análise.", false));
       return;
     }
-    const candidates = (Array.isArray(payload.candidates) ? payload.candidates : []).filter((candidate) => state.tier === "all" || String(candidate.tier) === state.tier);
+    const candidates = (Array.isArray(payload.candidates) ? payload.candidates : [])
+      .filter((candidate) => matchingLeague(candidate))
+      .filter((candidate) => state.tier === "all" || String(candidate.tier) === state.tier);
     if (!candidates.length) {
       const filtered = state.tier !== "all";
-      const title = filtered ? `Nenhum candidato Tier ${state.tier} no momento.` : "Aguardando uma análise verificada.";
+      const title = filtered ? `Nenhuma análise Tier ${state.tier} neste recorte.` : "Nenhuma análise detalhada neste recorte.";
       const details = filtered
-        ? "Altere o filtro para ver outros tiers ou atualize a leitura cacheada."
-        : `${payload.analyzedCount || 0} jogo(s) foram lidos, mas ${payload.verifiedCount || 0} atingiram a cobertura mínima de dados.`;
+        ? "Altere o tier ou o campeonato. Jogos detectados sem análise detalhada continuam visíveis no mapa abaixo."
+        : "O mapa abaixo separa os jogos aguardando detalhamento para preservar a quota diária.";
       dashboard.append(emptyState(title, details, false));
-      return;
+    } else {
+      const grid = element("section", "candidate-grid");
+      candidates.forEach((candidate) => grid.append(buildCandidate(candidate)));
+      dashboard.append(grid);
     }
-    const grid = element("section", "candidate-grid");
-    candidates.forEach((candidate) => grid.append(buildCandidate(candidate)));
-    dashboard.append(grid);
+    renderScreening();
+  }
+
+  function syncLeagueOptions(payload) {
+    const items = [...(Array.isArray(payload.candidates) ? payload.candidates : []), ...(Array.isArray(payload.screenedFixtures) ? payload.screenedFixtures : [])];
+    const unique = new Map();
+    items.forEach((item) => unique.set(leagueKey(item), leagueLabel(item)));
+    leagueFilter.replaceChildren();
+    const all = element("option", "", "Todos os campeonatos");
+    all.value = "all";
+    leagueFilter.append(all);
+    [...unique.entries()].sort((left, right) => left[1].localeCompare(right[1], "pt-BR")).forEach(([key, label]) => {
+      const option = element("option", "", label);
+      option.value = key;
+      leagueFilter.append(option);
+    });
+    if (!unique.has(state.league)) state.league = "all";
+    leagueFilter.value = state.league;
   }
 
   function setSummary(payload) {
+    numbers.screened.textContent = String(payload.screenedCount ?? 0);
     numbers.analyzed.textContent = String(payload.analyzedCount ?? 0);
     numbers.verified.textContent = String(payload.verifiedCount ?? 0);
-    numbers.tierOne.textContent = String(payload.tierOneCount ?? 0);
-    numbers.updated.textContent = payload.sourceUpdatedAt ? ptShortDate.format(new Date(payload.sourceUpdatedAt)) : "sem leitura";
+    numbers.qualified.textContent = String(payload.qualifiedCount ?? 0);
+    numbers.updated.textContent = payload.sourceUpdatedAt ? ptShortDate.format(new Date(payload.sourceUpdatedAt)) : (payload.scanUpdatedAt ? ptShortDate.format(new Date(payload.scanUpdatedAt)) : "sem leitura");
+    tierButtons.forEach((button) => {
+      const tier = button.dataset.tier || "all";
+      button.textContent = tier === "all" ? "Todos" : `T${tier} · ${payload.tierCounts?.[tier] ?? 0}`;
+    });
   }
 
   async function load() {
@@ -180,12 +295,14 @@
       });
       if (!response.ok) throw new Error(`Feed indisponível (${response.status})`);
       const payload = await response.json();
-      if (!payload || payload.schemaVersion !== 1 || !Array.isArray(payload.candidates)) throw new Error("Formato de feed inválido");
+      if (!payload || payload.schemaVersion !== 2 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures)) throw new Error("Formato de feed inválido");
       state.payload = payload;
       setSummary(payload);
+      syncLeagueOptions(payload);
       render();
     } catch (error) {
       dashboard.replaceChildren(emptyState("Não foi possível carregar o radar.", "A leitura pública será tentada novamente quando você clicar em atualizar.", true));
+      screening.replaceChildren();
       console.warn("APITOLHEIRO public dashboard", error instanceof Error ? error.message : "unknown error");
     } finally {
       refreshButton.disabled = false;
@@ -198,6 +315,10 @@
     tierButtons.forEach((item) => item.classList.toggle("selected", item === button));
     render();
   }));
+  leagueFilter.addEventListener("change", () => {
+    state.league = leagueFilter.value || "all";
+    render();
+  });
   refreshButton.addEventListener("click", () => void load());
   void load();
 })();

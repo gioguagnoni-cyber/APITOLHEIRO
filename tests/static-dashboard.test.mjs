@@ -9,8 +9,20 @@ test("a entrega pública é uma página estática e usa somente o RPC limitado",
   const script = read("docs/app.js");
   assert.match(page, /<script src="\.\/config\.js"><\/script>/);
   assert.match(script, /rpc\/get_public_tipster_dashboard/);
+  assert.match(script, /schemaVersion !== 2/);
   assert.match(script, /credentials: "omit"/);
   assert.doesNotMatch(script, /api-football|cron_secret|supabase_secret|service_role/i);
+});
+
+test("o painel traz transparência de tiers, campeonatos e jogos detectados", () => {
+  const page = read("docs/index.html");
+  const script = read("docs/app.js");
+  assert.match(page, /id="league-filter"/);
+  assert.match(page, /id="screening"/);
+  assert.match(script, /screenedFixtures/);
+  assert.match(script, /classificationLabel/);
+  assert.match(script, /decision-checks/);
+  assert.match(page, /data-tier="4"/);
 });
 
 test("a configuração pública não contém credenciais de servidor", () => {

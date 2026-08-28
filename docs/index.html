@@ -29,16 +29,17 @@
       </section>
 
       <section class="status-strip" aria-label="Resumo do radar">
-        <div><span>Jogos analisados</span><strong id="analyzed-count">—</strong></div>
-        <div><span>Leituras verificadas</span><strong id="verified-count">—</strong></div>
-        <div><span>Tier 1 no radar</span><strong id="tier-one-count">—</strong></div>
+        <div><span>Jogos detectados</span><strong id="screened-count">—</strong></div>
+        <div><span>Análises detalhadas</span><strong id="analyzed-count">—</strong></div>
+        <div><span>Cobertura ≥ 65%</span><strong id="verified-count">—</strong></div>
+        <div><span>Qualificados</span><strong id="qualified-count">—</strong></div>
         <div><span>Fonte atualizada</span><strong id="source-updated">carregando</strong></div>
       </section>
 
       <section class="content-header">
         <div>
-          <p class="kicker">RADAR DE HOJE</p>
-          <h2>Candidatos ordenados por sinal composto</h2>
+          <p class="kicker">LEITURAS DETALHADAS</p>
+          <h2>Todos os tiers, sem esconder as análises fracas</h2>
         </div>
         <div class="actions">
           <div class="tier-filters" aria-label="Filtrar por tier" role="group">
@@ -48,6 +49,7 @@
             <button type="button" data-tier="3">T3</button>
             <button type="button" data-tier="4">T4</button>
           </div>
+          <label class="league-filter" for="league-filter"><span>Campeonato</span><select id="league-filter"><option>Carregando…</option></select></label>
           <button id="refresh-button" class="refresh-button" type="button">Atualizar leitura</button>
         </div>
       </section>
@@ -56,9 +58,20 @@
         <div class="loading-grid" aria-label="Carregando radar"><div></div><div></div><div></div></div>
       </section>
 
+      <section class="screening-section" aria-labelledby="screening-title">
+        <div class="screening-heading">
+          <div>
+            <p class="kicker">MAPA DA VARREDURA</p>
+            <h2 id="screening-title">Jogos detectados e prioridade de análise</h2>
+          </div>
+          <p id="screening-meta">Carregando o mapa de campeonatos…</p>
+        </div>
+        <div id="screening" aria-live="polite"></div>
+      </section>
+
       <section class="method">
-        <div><p class="kicker">COMO LER</p><h2>Compensação, não checklist.</h2></div>
-        <p>Um dado fraco pode ser compensado por outros sinais. Dados ausentes reduzem a confiança em vez de virarem pontos positivos. Apenas leituras com cobertura mínima aparecem como candidatas verificadas.</p>
+        <div><p class="kicker">COMO LER</p><h2>Transparência antes da decisão.</h2></div>
+        <p>O mapa mostra todos os jogos encontrados na última varredura. As análises detalhadas exibem Tier, critérios atendidos e motivo de não qualificação. Dados ausentes diminuem a confiança; nunca viram sinal positivo.</p>
       </section>
     </main>
     <script src="./config.js"></script>
