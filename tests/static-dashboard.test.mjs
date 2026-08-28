@@ -9,7 +9,7 @@ test("a entrega pública é uma página estática e usa somente o RPC limitado",
   const script = read("docs/app.js");
   assert.match(page, /<script src="\.\/config\.js"><\/script>/);
   assert.match(script, /rpc\/get_public_tipster_dashboard/);
-  assert.match(script, /schemaVersion !== 5/);
+  assert.match(script, /schemaVersion !== 6/);
   assert.match(script, /credentials: "omit"/);
   assert.doesNotMatch(script, /api-football|cron_secret|supabase_secret|service_role/i);
 });
@@ -26,6 +26,7 @@ test("o painel traz transparência de tiers, campeonatos e jogos detectados", ()
   assert.match(script, /footballData/);
   assert.match(script, /classificationLabel/);
   assert.match(script, /decision-checks/);
+  assert.match(script, /homeLast5/);
   assert.match(page, /data-tier="4"/);
   assert.match(page, /id="results"/);
   assert.match(page, /id="owner-dialog"/);
