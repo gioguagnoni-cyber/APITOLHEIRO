@@ -483,11 +483,14 @@ const fixturePriority = (fixture: ProviderFixture) => {
   return ["Brazil", "Argentina", "England", "Spain", "Italy", "Germany", "France", "Portugal"].includes(fixture.league.country || "") ? 50 : 0;
 };
 
-const tierFor = (probability: number, confidence: number): 1 | 2 | 3 | 4 => {
-  if (probability >= 75 && confidence >= 0.65) return 1;
-  if (probability >= 68) return 2;
-  if (probability >= 60) return 3;
-  return 4;
+// A recommendation begins with a transparent, deterministic home-team gate.
+// The model score remains informative, but it is never allowed to turn an
+// incomplete mandatory record into a published suggestion.
+const tierFor = (mandatoryComplete: boolean, supplementaryPoints: number): 1 | 2 | 3 | 4 => {
+  if (!mandatoryComplete) return 4;
+  if (supplementaryPoints >= 3) return 1;
+  if (supplementaryPoints >= 1) return 2;
+  return 3;
 };
 
 const apiPercent = (prediction: Prediction[] | null, favorite: "home" | "away") => safeNumber(
@@ -594,13 +597,16 @@ const reviewWithAi = async (credential: AiWorkerCredential, fixture: ProviderFix
 const applyAiReview = (insight: Insight, review: AiReview): Insight => {
   const probability = Math.round(clamp(insight.probability / 100 + review.scoreDelta, 0.38, 0.92) * 100);
   const score = Math.round(clamp(insight.score / 100 + review.scoreDelta, 0, 1) * 100);
-  const oddsInRange = insight.odds !== null && insight.odds >= 1.3 && insight.odds <= 2.9;
+  const mandatory = (insight.metrics.mandatory || {}) as { complete?: boolean };
+  const supplementary = (insight.metrics.supplementary || {}) as { points?: number };
   return {
     ...insight,
     probability,
     score,
-    tier: tierFor(probability, insight.dataConfidence),
-    eligible: probability >= 75 && oddsInRange && insight.dataConfidence >= 0.65,
+    // AI is a bounded risk review. It can never promote a fixture that missed
+    // the three factual requirements, and it does not create a bonus point.
+    tier: tierFor(mandatory.complete === true, Number(supplementary.points) || 0),
+    eligible: mandatory.complete === true,
     metrics: { ...insight.metrics, ai: { providerReview: "concluída", scoreDelta: review.scoreDelta } },
     reasons: [...insight.reasons, `Revisão de IA: ${review.summary}`],
     caveats: [...insight.caveats, ...review.riskFlags.map((flag) => `Revisão de IA: ${flag}`)],
@@ -624,12 +630,15 @@ const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, 
   const awayPosition = footballData.awayPosition ?? apiAwayPosition;
   const resolvedHomeRecent = homeRecent ?? footballData.homeRecent;
   const resolvedAwayRecent = awayRecent ?? footballData.awayRecent;
-  const favorite = chooseFavorite(fixture, prediction, homePosition, awayPosition, resolvedHomeRecent, resolvedAwayRecent);
-  const favoriteTeam = favorite === "home" ? fixture.teams.home : fixture.teams.away;
-  const opponentTeam = favorite === "home" ? fixture.teams.away : fixture.teams.home;
-  const favoriteRecent = favorite === "home" ? resolvedHomeRecent : resolvedAwayRecent;
-  const favoritePosition = favorite === "home" ? homePosition : awayPosition;
-  const opponentPosition = favorite === "home" ? awayPosition : homePosition;
+  // The required rules are intentionally home-team only: last five *at home*
+  // cannot be substituted with an away record. Away teams may appear in the
+  // audit map, but are never promoted as a home-win recommendation.
+  const favorite = "home" as const;
+  const favoriteTeam = fixture.teams.home;
+  const opponentTeam = fixture.teams.away;
+  const favoriteRecent = resolvedHomeRecent;
+  const favoritePosition = homePosition;
+  const opponentPosition = awayPosition;
   const favoriteInjuries = (injuries || []).filter((injury) => injury.team?.id === favoriteTeam.id).length;
   const opponentInjuries = (injuries || []).filter((injury) => injury.team?.id === opponentTeam.id).length;
   const confirmedLineup = (lineups || []).some((lineup) => lineup.team?.id === favoriteTeam.id && (lineup.startXI?.length || 0) >= 11);
@@ -658,6 +667,41 @@ const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, 
   const probability = Math.round(clamp(normalizedScore * 0.78 + (marketProbability ?? normalizedScore) * 0.22, 0.38, 0.92) * 100);
   const confidence = Math.round(availableWeight * 100) / 100;
   const oddsInRange = odds !== null && odds >= 1.3 && odds <= 2.9;
+  const mandatory = {
+    last10: {
+      requiredWins: 6,
+      observedWins: favoriteRecent?.wins ?? null,
+      observedMatches: favoriteRecent?.total ?? 0,
+      passed: (favoriteRecent?.total ?? 0) >= 10 && (favoriteRecent?.wins ?? 0) >= 6,
+    },
+    homeLast5: {
+      requiredWins: 3,
+      observedWins: favoriteRecent?.venueWins ?? null,
+      observedMatches: favoriteRecent?.venueTotal ?? 0,
+      passed: (favoriteRecent?.venueTotal ?? 0) >= 5 && (favoriteRecent?.venueWins ?? 0) >= 3,
+    },
+    tableGap: {
+      requiredPositions: 7,
+      observedPositions: tableGap,
+      passed: tableGap !== null && tableGap >= 7,
+    },
+  };
+  const mandatoryComplete = mandatory.last10.passed && mandatory.homeLast5.passed && mandatory.tableGap.passed;
+  const supplementaryRules = [
+    { key: "odd_operacional", label: "Odd entre 1,30 e 2,90", passed: oddsInRange },
+    { key: "predicao_externa", label: "Predição API-Football do mandante ≥ 60%", passed: predictionProbability !== null && predictionProbability >= 60 },
+    { key: "lesoes", label: "Menos baixas listadas que o adversário", passed: injuries !== null && favoriteInjuries < opponentInjuries },
+    { key: "criacao", label: "Criação/xG proxy positivo", passed: xgProxy !== null && xgProxy > 0 },
+    { key: "statsbomb", label: "Perfil histórico StatsBomb favorável", passed: historicalPrior.score !== null && historicalPrior.score >= 0.58 },
+    { key: "fonte_oficial", label: "Tabela e forma conferidas pela football-data.org", passed: footballData.status === "confirmado" },
+    { key: "escalacao", label: "Escalação titular confirmada", passed: lineupStatus === "confirmada" },
+  ];
+  const supplementaryPoints = supplementaryRules.filter((rule) => rule.passed).length;
+  const missingMandatory = [
+    !mandatory.last10.passed ? `Últimos 10: ${mandatory.last10.observedWins ?? "—"}/${mandatory.last10.observedMatches}; mínimo 6 vitórias em 10 jogos.` : null,
+    !mandatory.homeLast5.passed ? `Últimos 5 em casa: ${mandatory.homeLast5.observedWins ?? "—"}/${mandatory.homeLast5.observedMatches}; mínimo 3 vitórias em 5 jogos.` : null,
+    !mandatory.tableGap.passed ? `Tabela: ${tableGap === null ? "posição indisponível" : `${tableGap >= 0 ? "+" : ""}${tableGap} posições`}; mínimo +7.` : null,
+  ].filter((value): value is string => Boolean(value));
   return {
     fixtureId: fixture.fixture.id,
     kickoff: fixture.fixture.date,
@@ -669,13 +713,19 @@ const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, 
     probability,
     dataConfidence: confidence,
     score: Math.round(normalizedScore * 100),
-    tier: tierFor(probability, confidence),
-    eligible: probability >= 75 && oddsInRange && confidence >= 0.65,
+    tier: tierFor(mandatoryComplete, supplementaryPoints),
+    eligible: mandatoryComplete,
     sourceUpdatedAt: utcNow(),
     metrics: {
       last10: favoriteRecent,
       venueLast5: venueMetrics(favoriteRecent),
       tableGap,
+      mandatory: { ...mandatory, complete: mandatoryComplete },
+      supplementary: {
+        points: supplementaryPoints,
+        passed: supplementaryRules.filter((rule) => rule.passed).map((rule) => rule.key),
+        rules: supplementaryRules,
+      },
       opponentStrength: strengthLabel(opponentPosition),
       xg: { value: xgProxy === null ? null : Math.round(xgProxy * 100) / 100, mode: xgProxy === null ? "indisponível" : "proxy", label: xgProxy === null ? "Sem xG ou proxy disponível" : "Proxy de criação recente" },
       lineup: { status: lineupStatus, unavailableCount: injuries ? favoriteInjuries : null },
@@ -693,18 +743,21 @@ const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, 
       },
     },
     reasons: [
-      formRate !== null ? `Forma recente: ${favoriteRecent?.wins} vitórias nos últimos ${favoriteRecent?.total}.` : null,
-      venueRate !== null ? `Recorte de mando: ${favoriteRecent?.venueWins} vitórias em ${favoriteRecent?.venueTotal}.` : null,
-      tableGap !== null ? `Diferença de tabela: ${tableGap >= 0 ? "+" : ""}${tableGap} posições.` : null,
+      mandatoryComplete ? "As 3 regras obrigatórias foram atendidas: 6/10, 3/5 em casa e vantagem mínima de 7 posições." : null,
+      formRate !== null ? `Mandante: ${favoriteRecent?.wins} vitórias nos últimos ${favoriteRecent?.total}.` : null,
+      venueRate !== null ? `Mandante em casa: ${favoriteRecent?.venueWins} vitórias em ${favoriteRecent?.venueTotal}.` : null,
+      tableGap !== null ? `Vantagem do mandante na tabela: ${tableGap >= 0 ? "+" : ""}${tableGap} posições.` : null,
       odds ? `Odd observada: ${odds.toFixed(2)}.` : null,
       predictionProbability !== null ? `Previsão externa usada como um dos sinais: ${predictionProbability}%.` : null,
+      supplementaryPoints ? `${supplementaryPoints} sinal(is) complementar(es) elevaram o tier.` : null,
       historicalPrior.score !== null ? `Base histórica StatsBomb: ${historicalPrior.metrics.xgForPerMatch} xG por jogo em ${historicalPrior.metrics.favoriteMatches} partidas agregadas.` : null,
       footballData.status === "confirmado" ? `Tabela e forma na competição confirmadas pela football-data.org (${footballData.competitionCode}).` : null,
     ].filter((value): value is string => Boolean(value)),
     caveats: [
+      ...missingMandatory,
       xgProxy === null ? "xG indisponível; o modelo não inventa esse indicador." : "Indicador de criação em modo proxy; não equivale a xG oficial.",
       lineupStatus !== "confirmada" ? "Escalação ainda não confirmada." : null,
-      oddsInRange ? null : "Odd fora da faixa operacional de 1,30–2,90 ou indisponível.",
+      oddsInRange ? null : "Odd fora da faixa operacional de 1,30–2,90 ou indisponível; isto não bloqueia as três regras obrigatórias.",
       historicalPrior.score !== null ? "StatsBomb é base histórica seletiva; não é dado ao vivo nem confirmação de escalação." : null,
       ["sem cobertura", "indisponível", "não configurada"].includes(footballData.status) ? `football-data.org: ${footballData.label}.` : null,
     ].filter((value): value is string => Boolean(value)),
@@ -724,7 +777,7 @@ const persistInsight = async (fixture: ProviderFixture, insight: Insight, target
     venue_name: fixture.fixture.venue?.name || null,
   });
   const analysis = await upsert<{ id: string }>("fixture_analyses", "fixture_id", {
-    fixture_id: savedFixture.id, model_version: "v1.3", probability: insight.probability, confidence: insight.dataConfidence,
+    fixture_id: savedFixture.id, model_version: "v2.0-mandatory-home", probability: insight.probability, confidence: insight.dataConfidence,
     model_score: insight.score, tier: insight.tier, eligible: insight.eligible, favorite_side: insight.favorite,
     recommended_market: insight.recommendedMarket, bookmaker: insight.bookmaker, odds: insight.odds,
     implied_probability: insight.impliedProbability, metrics: insight.metrics, reasons: insight.reasons, caveats: insight.caveats,
@@ -741,7 +794,7 @@ const persistInsight = async (fixture: ProviderFixture, insight: Insight, target
       market_code: "match_winner_90",
       favorite_side: insight.favorite,
       recommended_market: insight.recommendedMarket,
-      model_version: "v1.3",
+      model_version: "v2.0-mandatory-home",
       probability: insight.probability,
       confidence: insight.dataConfidence,
       tier: insight.tier,
