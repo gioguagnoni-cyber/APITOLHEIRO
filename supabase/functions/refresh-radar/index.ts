@@ -117,7 +117,8 @@ const databaseRequest = async <T>(path: string, init: RequestInit = {}) => {
   });
   if (!response.ok) throw new Error(`Database request failed (${response.status}).`);
   if (response.status === 204) return null as T;
-  return await response.json() as T;
+  const body = await response.text();
+  return body ? JSON.parse(body) as T : null as T;
 };
 
 const rpc = <T>(name: string, args: Record<string, unknown> = {}) =>
