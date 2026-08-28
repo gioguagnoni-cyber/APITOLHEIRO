@@ -443,7 +443,14 @@ const footballDataContext = async (client: FootballDataClient, apiKey: string | 
   // essential. Treating the whole response as an array silently erased recent
   // form, which in turn made every mandatory last-10 / home-last-5 check fail.
   const matchesResponse = await client.optional<FootballDataMatchesResponse>(`competitions/${competitionCode}/matches?status=FINISHED&limit=100`, 180, apiKey);
-  const matches = matchesResponse?.matches || null;
+  // Early league rounds do not provide ten finished matches per club in the
+  // current season. The official API supports `season`, so merge the completed
+  // prior campaign before measuring the real latest ten and five home matches.
+  const priorSeason = fixture.league.season > 1900 ? fixture.league.season - 1 : null;
+  const priorMatchesResponse = priorSeason
+    ? await client.optional<FootballDataMatchesResponse>(`competitions/${competitionCode}/matches?season=${priorSeason}&status=FINISHED&limit=500`, 720, apiKey)
+    : null;
+  const matches = [...(matchesResponse?.matches || []), ...(priorMatchesResponse?.matches || [])];
   const homeRecent = footballDataRecent(matches, fixture.teams.home.name, true);
   const awayRecent = footballDataRecent(matches, fixture.teams.away.name, false);
   const hasTable = homePosition !== null && awayPosition !== null;
@@ -782,7 +789,7 @@ const persistInsight = async (fixture: ProviderFixture, insight: Insight, target
     venue_name: fixture.fixture.venue?.name || null,
   });
   const analysis = await upsert<{ id: string }>("fixture_analyses", "fixture_id", {
-    fixture_id: savedFixture.id, model_version: "v2.2-mandatory-home-official-form", probability: insight.probability, confidence: insight.dataConfidence,
+    fixture_id: savedFixture.id, model_version: "v2.3-mandatory-home-cross-season", probability: insight.probability, confidence: insight.dataConfidence,
     model_score: insight.score, tier: insight.tier, eligible: insight.eligible, favorite_side: insight.favorite,
     recommended_market: insight.recommendedMarket, bookmaker: insight.bookmaker, odds: insight.odds,
     implied_probability: insight.impliedProbability, metrics: insight.metrics, reasons: insight.reasons, caveats: insight.caveats,
@@ -799,7 +806,7 @@ const persistInsight = async (fixture: ProviderFixture, insight: Insight, target
       market_code: "match_winner_90",
       favorite_side: insight.favorite,
       recommended_market: insight.recommendedMarket,
-      model_version: "v2.2-mandatory-home-official-form",
+      model_version: "v2.3-mandatory-home-cross-season",
       probability: insight.probability,
       confidence: insight.dataConfidence,
       tier: insight.tier,
