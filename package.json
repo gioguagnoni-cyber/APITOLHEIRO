@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:static": "node --test tests/static-dashboard.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.112.4",

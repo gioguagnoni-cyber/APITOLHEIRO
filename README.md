@@ -17,6 +17,15 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 - A RPC de quota é SECURITY DEFINER com search_path fixo, validação de parâmetros e EXECUTE revogado de PUBLIC, anon e authenticated.
 - O endpoint de ingestão exige Authorization Bearer CRON_SECRET. Não há botão público de refresh que possa consumir a quota.
 
+## Entrega pública via GitHub Pages
+
+A interface pública oficial está em `docs/`, como no modelo de entrega do DASHNAVE. O GitHub Pages serve arquivos estáticos e a página consulta somente a RPC `get_public_tipster_dashboard` no Supabase.
+
+- A página não chama a API-Football, não conhece o segredo de cron e não tem acesso às tabelas operacionais.
+- O Supabase expõe apenas um JSON limitado a 32 leituras atuais com cobertura mínima de dados. Cache, logs de uso, payloads do provedor e credenciais permanecem privados.
+- `docs/config.js` contém somente a URL do projeto e uma chave `sb_publishable`, projetada pelo Supabase para uso em navegador. A proteção está nas permissões da RPC e no contrato fixo que ela retorna.
+- Configure GitHub Pages para publicar a branch `main`, pasta `/docs`. A URL esperada é `https://gioguagnoni-cyber.github.io/APITOLHEIRO/`.
+
 ## Configuração
 
 1. Copie .env.example para .env.local.
@@ -34,6 +43,7 @@ O banco já possui as migrações em supabase/migrations. A aplicação usa um t
     npm run typecheck
     npm run lint
     npm run build
+    npm run test:static
 
 ## Limites de dados
 
