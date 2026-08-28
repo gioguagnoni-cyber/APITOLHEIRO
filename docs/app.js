@@ -232,7 +232,7 @@
     if (!payload) return;
     const fixtures = (Array.isArray(payload.screenedFixtures) ? payload.screenedFixtures : []).filter(matchingLeague);
     screeningMeta.textContent = fixtures.length
-      ? `${fixtures.length} jogo(s) detectado(s) no recorte atual. “Aguardando detalhamento” significa que não houve consumo adicional de API naquele jogo.`
+      ? `${fixtures.length} jogo(s) detectado(s) no recorte atual. A rotina noturna publica Tier para cada jogo prioritário; “aguardando” só aparece antes de a publicação terminar.`
       : "Nenhum jogo detectado para o campeonato selecionado na última varredura.";
     if (!fixtures.length) {
       screening.append(emptyState("Sem jogos no recorte.", "Altere o campeonato ou aguarde a próxima varredura cacheada.", false));
@@ -253,7 +253,7 @@
       if (fixture.analysisStatus === "analisado") {
         status.append(element("strong", "", `Analisado · Tier ${fixture.tier}`), element("small", "", `${formatNumber(fixture.probability)}% · ${Math.round((Number(fixture.dataConfidence) || 0) * 100)}% cobertura`));
       } else {
-        status.append(element("strong", "", "Aguardando detalhamento"), element("small", "", "priorização por quota"));
+        status.append(element("strong", "", "Aguardando publicação"), element("small", "", "rotina noturna pendente"));
       }
       const decision = element("div", "screen-decision", fixture.analysisStatus === "analisado" ? (fixture.classificationLabel || "Analisado") : fixture.screeningReason);
       row.append(competition, match, kickoff, status, decision);
@@ -276,8 +276,8 @@
       const filtered = state.tier !== "all";
       const title = filtered ? `Nenhuma análise Tier ${state.tier} neste recorte.` : "Nenhuma análise detalhada neste recorte.";
       const details = filtered
-        ? "Altere o tier ou o campeonato. Jogos detectados sem análise detalhada continuam visíveis no mapa abaixo."
-        : "O mapa abaixo separa os jogos aguardando detalhamento para preservar a quota diária.";
+        ? "Altere o tier ou o campeonato. O mapa abaixo mantém os jogos que aguardam a publicação noturna."
+        : "Ainda não existe uma publicação concluída para este recorte. O mapa abaixo mostra o estado da varredura.";
       dashboard.append(emptyState(title, details, false));
     } else {
       const grid = element("section", "candidate-grid");
