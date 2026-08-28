@@ -81,6 +81,7 @@
   }
 
   function checkValue(name, value) {
+    if (value === null || value === undefined || value === "") return name === "oddsRange" ? "sem odd" : "—";
     if (name === "coverageThreshold") return Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : "—";
     if (name === "oddsRange") return Number.isFinite(Number(value)) ? formatNumber(value, 2) : "sem odd";
     return Number.isFinite(Number(value)) ? `${formatNumber(value)}%` : "—";
