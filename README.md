@@ -12,6 +12,7 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 - Sincroniza o catálogo e agregados históricos do StatsBomb Open Data em uma Edge Function separada. São guardadas métricas derivadas por partida e por equipe (xG, finalizações, passes completos e pressões), nunca o payload bruto de eventos.
 - Usa a football-data.org como conferência oficial opcional de tabela e forma por competição. São até duas chamadas cacheáveis por competição presente na varredura. A fonte só substitui a posição de tabela quando os dois times são associados com segurança.
 - Congela cada publicação pré-jogo em um snapshot imutável. Às 02:10 BRT, com novas conferências às 04:10 e 08:10, registra Green, Red ou Anulado. Para o mercado 1X2 recomendado, liquidação é pelo placar aos 90 minutos mais acréscimos — prorrogação e pênaltis não contam.
+- Reconsulta cada sugestão elegível na janela de 20 a 100 minutos antes do início. Quando a API-Football publicar 11 titulares, a tela passa a exibir a escalação, horário e fonte da revisão. Se uma escalação oficial já registrada mudar, ou se surgirem novas baixas listadas em relação à varredura inicial, o sistema registra a diferença, reduz a estimativa de forma conservadora e rebaixa ou suspende a sugestão. A publicação original não é apagada.
 - Oferece uma área exclusiva do proprietário para vincular OpenAI, DeepSeek ou Gemini. A chave é transmitida por HTTPS, criptografada no banco com uma chave mestra do Vault e não é exposta ao feed público, GitHub Pages, logs de UI ou repositório. A revisão de IA é opcional e tem limite explícito por publicação.
 
 ## Segurança
@@ -52,6 +53,8 @@ O frontend não requer servidor externo ou Vercel. A atualização diária é fe
 O job `refresh-radar` roda diariamente às 02:30 UTC, que corresponde a 23:30 BRT do dia anterior, e analisa o dia seguinte. `settle-published-bets` roda às 05:10, 07:10 e 11:10 UTC (02:10, 04:10 e 08:10 BRT) para liquidar publicações pendentes. Ambos usam chaves internas já disponibilizadas pelo runtime do Supabase e não precisam de configuração no navegador.
 
 O job `refresh-statsbomb-history` executa aos minutos 07 e 37 de cada hora e avança de forma incremental para evitar sobrecarga. O repositório [StatsBomb Open Data](https://github.com/hudl/open-data) é histórico e seletivo, não um feed ao vivo; publicações baseadas nesses agregados exibem a atribuição StatsBomb exigida pela fonte.
+
+O job `refresh-apitolheiro-lineup-review` é chamado a cada 10 minutos, mas a própria função só consulta jogos sugeridos na janela pré-jogo e aplica cache curto. No plano gratuito ela compartilha o teto diário de 100 chamadas com a varredura noturna e prioriza no máximo quatro jogos por ciclo; em planos com quota maior, o mesmo mecanismo continua a registrar a trilha de auditoria sem expor a chave.
 
 O banco já possui as migrações em supabase/migrations. A aplicação usa até 82 chamadas de análise em uma execução, com uma margem diária para a liquidação e falhas de provedor. Se houver mais jogos do que o orçamento permite para previsões individuais, todos recebem o Tier baseado nos sinais já obtidos e a ausência é descrita nos caveats.
 
