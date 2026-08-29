@@ -69,7 +69,14 @@
     const total = venue ? metrics.venueTotal : metrics.total;
     const wins = venue ? metrics.venueWins : metrics.wins;
     if (!Number.isFinite(total) || !Number.isFinite(wins)) return { main: "—", detail: "sem histórico" };
-    return { main: `${wins}V / ${total}`, detail: venue ? "recorte do mando" : `${metrics.wins}V ${metrics.draws}E ${metrics.losses}D` };
+    const draws = venue ? metrics.venueDraws : metrics.draws;
+    const losses = venue ? metrics.venueLosses : metrics.losses;
+    const goalsFor = venue ? metrics.venueGoalsFor : metrics.goalsFor;
+    const goalsAgainst = venue ? metrics.venueGoalsAgainst : metrics.goalsAgainst;
+    return {
+      main: `${wins}V ${draws ?? "—"}E ${losses ?? "—"}D`,
+      detail: `${total} jogos · ${goalsFor ?? "—"} GF / ${goalsAgainst ?? "—"} GA`,
+    };
   }
 
   function strengthTone(value) {
@@ -104,6 +111,8 @@
       odd_fora_da_faixa: "Odd fora da faixa",
       probabilidade_abaixo_meta: "Abaixo da meta",
       monitorar: "Monitorar",
+      lineup_downgraded: "Rebaixado · escalação",
+      lineup_suspended: "Suspenso · escalação",
     };
     return labels[candidate.classification] || "Analisado";
   }
@@ -142,6 +151,11 @@
     const favoriteIsHome = candidate.favorite === "home";
     const xg = metrics.xg || {};
     const lineup = metrics.lineup || {};
+    const lineupReview = lineup.lineupReview || {};
+    const table = metrics.table || {};
+    const prediction = metrics.prediction || {};
+    const injuries = metrics.injuries || {};
+    const sources = metrics.sources || {};
     const statsbomb = metrics.statsbomb || {};
     const footballData = metrics.footballData || {};
     const statsbombAvailable = statsbomb.status === "histórico";
@@ -158,6 +172,15 @@
     const footballDataCaption = footballDataVerified
       ? `${footballData.competitionCode || "competição"} · ${footballData.favoriteRecentMatches || 0} jogos recentes`
       : (footballData.label || "não altera o score");
+    const lineupStatus = lineupReview.status || lineup.status || "indisponível";
+    const lineupTone = ["downgraded", "suspended"].includes(lineupStatus) ? "negative" : lineupStatus === "confirmed" || lineupStatus === "unchanged" || lineup.status === "confirmada" ? "positive" : "";
+    const lineupCaption = lineupReview.checkedAt
+      ? `${lineupReview.startersConfirmed || "—"}/11 titulares · ${ptShortDate.format(new Date(lineupReview.checkedAt))}`
+      : lineup.unavailableCount === null || lineup.unavailableCount === undefined
+        ? "reconsulta pendente"
+        : `${lineup.unavailableCount} baixas listadas`;
+    const lineupValue = lineupStatus === "downgraded" ? "rebaixada" : lineupStatus === "suspended" ? "suspensa" : lineupStatus;
+    const sourceStamp = sources.apiFootball?.collectedAt || candidate.sourceUpdatedAt;
     const article = element("article", `candidate-card tier-${candidate.tier}`);
 
     const top = element("div", "card-topline");
@@ -193,11 +216,16 @@
       labelValue("Últimos 10", last10.main, last10.detail),
       labelValue("Últimos 5 no mando", venue.main, favoriteIsHome ? "em casa" : "fora de casa"),
       labelValue("Dif. de tabela", metrics.tableGap === null || metrics.tableGap === undefined ? "—" : `${Number(metrics.tableGap) >= 0 ? "+" : ""}${metrics.tableGap}`, "posições"),
+      labelValue("Tabela", table.homePosition && table.awayPosition ? `${table.homePosition}º × ${table.awayPosition}º` : "—", table.source || "posições indisponíveis"),
       labelValue("Força rival", metrics.opponentStrength || "indisponível", "proxy de tabela", strengthTone(metrics.opponentStrength)),
       labelValue(xg.mode === "xg" ? "xG diferencial" : "Criação", xg.value === null || xg.value === undefined ? "—" : `${Number(xg.value) > 0 ? "+" : ""}${formatNumber(xg.value, 2)}`, xg.mode === "proxy" ? "proxy de criação" : (xg.mode || "indisponível")),
-      labelValue("Escalação", lineup.status || "indisponível", lineup.unavailableCount === null || lineup.unavailableCount === undefined ? "baixas indisponíveis" : `${lineup.unavailableCount} baixas listadas`),
+      labelValue("Previsão externa", prediction.favoriteProbability === null || prediction.favoriteProbability === undefined ? "—" : `${formatNumber(prediction.favoriteProbability)}%`, prediction.source || "API-Football"),
+      labelValue("Baixas", injuries.favoriteCount === null || injuries.favoriteCount === undefined ? "—" : `${injuries.favoriteCount} × ${injuries.opponentCount ?? "—"}`, "sugerido × adversário"),
+      labelValue("Escalação oficial", lineupValue, lineupCaption, lineupTone),
+      labelValue("Ajuste pré-jogo", lineupReview.probabilityDelta === null || lineupReview.probabilityDelta === undefined ? "—" : `${Number(lineupReview.probabilityDelta) > 0 ? "+" : ""}${formatNumber(lineupReview.probabilityDelta)} pp`, lineupReview.decision || "aguarda escalação oficial", lineupTone),
       labelValue("StatsBomb", statsbombValue, statsbombCaption, statsbombAvailable ? "positive" : ""),
       labelValue("football-data.org", footballDataValue, footballDataCaption, footballDataVerified ? "positive" : ""),
+      labelValue("Coleta", sourceStamp ? ptShortDate.format(new Date(sourceStamp)) : "—", sources.apiFootball?.provider || "fonte indisponível"),
     );
 
     const footer = element("div", "card-footer");
@@ -217,8 +245,8 @@
     footer.append(odd, confidence);
 
     const notes = element("div", "card-notes");
-    (Array.isArray(candidate.reasons) ? candidate.reasons : []).slice(0, 2).forEach((reason) => notes.append(element("span", "reason", `+ ${reason}`)));
-    (Array.isArray(candidate.caveats) ? candidate.caveats : []).slice(0, 2).forEach((caveat) => notes.append(element("span", "caveat", `! ${caveat}`)));
+    (Array.isArray(candidate.reasons) ? candidate.reasons : []).forEach((reason) => notes.append(element("span", "reason", `+ ${reason}`)));
+    (Array.isArray(candidate.caveats) ? candidate.caveats : []).forEach((caveat) => notes.append(element("span", "caveat", `! ${caveat}`)));
     article.append(top, heading, recommendation, classification, buildChecks(candidate), signals, footer, notes);
     return article;
   }
@@ -488,7 +516,7 @@
       });
       if (!response.ok) throw new Error(`Feed indisponível (${response.status})`);
       const payload = await response.json();
-      if (!payload || payload.schemaVersion !== 7 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData || !payload.results) throw new Error("Formato de feed inválido");
+      if (!payload || payload.schemaVersion !== 8 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData || !payload.results) throw new Error("Formato de feed inválido");
       state.payload = payload;
       setSummary(payload);
       renderStatsBombSource(payload);
