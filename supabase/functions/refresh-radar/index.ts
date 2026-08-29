@@ -21,6 +21,10 @@ type RecentMetrics = {
   goalsAgainst: number;
   venueTotal: number;
   venueWins: number;
+  venueDraws: number;
+  venueLosses: number;
+  venueGoalsFor: number;
+  venueGoalsAgainst: number;
   unavailable: boolean;
 };
 
@@ -353,18 +357,32 @@ const recentMetrics = (fixtures: ProviderFixture[] | null, teamId: number, upcom
   const venue = complete.filter((fixture) => fixtureResult(fixture, teamId).isHome === upcomingIsHome).slice(0, 5).map((fixture) => fixtureResult(fixture, teamId));
   const allSummary = build(all);
   const venueSummary = build(venue);
-  return { total: all.length, ...allSummary, venueTotal: venue.length, venueWins: venueSummary.wins, unavailable: all.length === 0 };
+  return {
+    total: all.length,
+    ...allSummary,
+    venueTotal: venue.length,
+    venueWins: venueSummary.wins,
+    venueDraws: venueSummary.draws,
+    venueLosses: venueSummary.losses,
+    venueGoalsFor: venueSummary.goalsFor,
+    venueGoalsAgainst: venueSummary.goalsAgainst,
+    unavailable: all.length === 0,
+  };
 };
 
 const venueMetrics = (metrics: RecentMetrics | null): RecentMetrics | null => metrics && {
   total: metrics.venueTotal,
   wins: metrics.venueWins,
-  draws: 0,
-  losses: Math.max(0, metrics.venueTotal - metrics.venueWins),
-  goalsFor: 0,
-  goalsAgainst: 0,
+  draws: metrics.venueDraws,
+  losses: metrics.venueLosses,
+  goalsFor: metrics.venueGoalsFor,
+  goalsAgainst: metrics.venueGoalsAgainst,
   venueTotal: metrics.venueTotal,
   venueWins: metrics.venueWins,
+  venueDraws: metrics.venueDraws,
+  venueLosses: metrics.venueLosses,
+  venueGoalsFor: metrics.venueGoalsFor,
+  venueGoalsAgainst: metrics.venueGoalsAgainst,
   unavailable: metrics.venueTotal === 0,
 };
 
@@ -417,7 +435,15 @@ const footballDataRecent = (matches: FootballDataMatch[] | null, teamName: strin
   const aggregate = summary(all);
   const venueAggregate = summary(venue);
   return all.length ? {
-    total: all.length, ...aggregate, venueTotal: venue.length, venueWins: venueAggregate.wins, unavailable: false,
+    total: all.length,
+    ...aggregate,
+    venueTotal: venue.length,
+    venueWins: venueAggregate.wins,
+    venueDraws: venueAggregate.draws,
+    venueLosses: venueAggregate.losses,
+    venueGoalsFor: venueAggregate.goalsFor,
+    venueGoalsAgainst: venueAggregate.goalsAgainst,
+    unavailable: false,
   } : null;
 };
 
@@ -732,6 +758,14 @@ const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, 
       last10: favoriteRecent,
       venueLast5: venueMetrics(favoriteRecent),
       tableGap,
+      table: {
+        homePosition,
+        awayPosition,
+        favoritePosition,
+        opponentPosition,
+        gap: tableGap,
+        source: footballData.homePosition !== null && footballData.awayPosition !== null ? "football-data.org" : "API-Football",
+      },
       mandatory: { ...mandatory, complete: mandatoryComplete },
       supplementary: {
         points: supplementaryPoints,
@@ -740,7 +774,10 @@ const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, 
       },
       opponentStrength: strengthLabel(opponentPosition),
       xg: { value: xgProxy === null ? null : Math.round(xgProxy * 100) / 100, mode: xgProxy === null ? "indisponível" : "proxy", label: xgProxy === null ? "Sem xG ou proxy disponível" : "Proxy de criação recente" },
-      lineup: { status: lineupStatus, unavailableCount: injuries ? favoriteInjuries : null },
+      market: { odds, bookmaker, impliedProbability: marketProbability ? Math.round(marketProbability * 100) : null, rangeOperational: oddsInRange },
+      prediction: { favoriteProbability: predictionProbability, source: predictionProbability === null ? "indisponível" : "API-Football /predictions" },
+      injuries: { favoriteCount: injuries ? favoriteInjuries : null, opponentCount: injuries ? opponentInjuries : null },
+      lineup: { status: lineupStatus, unavailableCount: injuries ? favoriteInjuries : null, reviewedAt: null },
       statsbomb: historicalPrior.metrics,
       footballData: {
         status: footballData.status,
@@ -752,6 +789,11 @@ const buildInsight = (fixture: ProviderFixture, positions: Map<number, number>, 
         favoriteRecentMatches: favorite === "home" ? footballData.homeRecent?.total || null : footballData.awayRecent?.total || null,
         verificationScore: footballData.score,
         updatedAt: footballData.updatedAt,
+      },
+      sources: {
+        apiFootball: { provider: "API-Football", collectedAt: utcNow(), endpoints: ["fixtures", "standings", "predictions", "odds", "injuries"] },
+        footballData: { provider: "football-data.org", status: footballData.status, updatedAt: footballData.updatedAt },
+        statsBomb: { provider: "StatsBomb Open Data", status: historicalPrior.metrics.status || "sem cobertura", updatedAt: historicalPrior.metrics.sourceUpdatedAt || null },
       },
     },
     reasons: [
@@ -865,8 +907,6 @@ const runNextDayAnalysis = async (apiKey: string, footballDataApiKey: string | n
     scheduled.forEach((fixture) => representativeFixtures.set(`${fixture.league.id}:${fixture.league.season}`, fixture));
     for (const [key, fixture] of representativeFixtures) {
       const standings = await client.optional<StandingsResponse[]>("standings", { league: fixture.league.id, season: fixture.league.season }, 180, apiKey);
-      // A cached season payload provides form and home/away records for every
-      // team in a league, avoiding two provider calls for every individual game.
       // A current-season feed is not enough in August/early league rounds: it
       // can contain fewer than ten completed fixtures. Combine it with the
       // prior season once per league, then select the real latest-ten/latest-five
