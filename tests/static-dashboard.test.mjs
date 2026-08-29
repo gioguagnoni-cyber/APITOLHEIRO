@@ -9,7 +9,7 @@ test("a entrega pública é uma página estática e usa somente o RPC limitado",
   const script = read("docs/app.js");
   assert.match(page, /<script src="\.\/config\.js"><\/script>/);
   assert.match(script, /rpc\/get_public_tipster_dashboard/);
-  assert.match(script, /schemaVersion !== 6/);
+  assert.match(script, /schemaVersion !== 7/);
   assert.match(script, /credentials: "omit"/);
   assert.doesNotMatch(script, /api-football|cron_secret|supabase_secret|service_role/i);
 });
