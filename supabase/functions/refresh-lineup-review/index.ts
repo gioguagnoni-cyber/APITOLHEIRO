@@ -196,10 +196,12 @@ const queryCandidates = async () => {
   const query = new URLSearchParams({
     select: "id,fixture_id,probability,confidence,model_score,tier,eligible,favorite_side,metrics,reasons,caveats,fixtures!inner(id,provider_fixture_id,kickoff_at,home_team_id,away_team_id)",
     eligible: "eq.true",
-    "fixtures.kickoff_at": `gte.${from}`,
-    "fixtures.kickoff_at": `lte.${until}`,
     limit: String(MAX_FIXTURES_PER_RUN),
   });
+  // PostgREST combines repeated filters with AND. URLSearchParams#set would
+  // overwrite the lower bound, so append both values explicitly.
+  query.append("fixtures.kickoff_at", `gte.${from}`);
+  query.append("fixtures.kickoff_at", `lte.${until}`);
   const rows = await databaseRequest<AnalysisRow[]>(`fixture_analyses?${query}`);
   return (rows || []).filter((row) => Boolean(fixtureOf(row))).sort((left, right) =>
     new Date(fixtureOf(left).kickoff_at).getTime() - new Date(fixtureOf(right).kickoff_at).getTime(),
