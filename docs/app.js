@@ -488,7 +488,7 @@
       });
       if (!response.ok) throw new Error(`Feed indisponível (${response.status})`);
       const payload = await response.json();
-      if (!payload || payload.schemaVersion !== 6 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData || !payload.results) throw new Error("Formato de feed inválido");
+      if (!payload || payload.schemaVersion !== 7 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData || !payload.results) throw new Error("Formato de feed inválido");
       state.payload = payload;
       setSummary(payload);
       renderStatsBombSource(payload);
