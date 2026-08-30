@@ -29,6 +29,7 @@ test("o painel traz transparência de tiers, campeonatos e jogos detectados", ()
   assert.match(script, /homeLast5/);
   assert.match(script, /Escalação oficial/);
   assert.match(script, /Ajuste pré-jogo/);
+  assert.match(script, /XI oficial/);
   assert.match(page, /data-tier="4"/);
   assert.match(page, /id="results"/);
   assert.match(page, /id="owner-dialog"/);
