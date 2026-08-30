@@ -144,6 +144,27 @@
     return list;
   }
 
+  function buildOfficialLineup(lineup) {
+    const official = lineup.officialLineup || {};
+    const favorite = official.favorite || {};
+    const starters = Array.isArray(favorite.starters) ? favorite.starters : [];
+    if (!starters.length) return null;
+    const section = element("section", "official-lineup");
+    const title = element("div", "official-lineup-title");
+    title.append(
+      element("strong", "", `XI oficial · ${favorite.team || "lado sugerido"}`),
+      element("span", "", favorite.formation || "formação não informada"),
+    );
+    const players = element("div", "official-lineup-players");
+    starters.forEach((player) => {
+      const chip = element("span", "", player.name || "Jogador não identificado");
+      if (player.position) chip.title = player.position;
+      players.append(chip);
+    });
+    section.append(title, players);
+    return section;
+  }
+
   function buildCandidate(candidate) {
     const metrics = candidate.metrics || {};
     const last10 = record(metrics.last10, false);
@@ -247,7 +268,10 @@
     const notes = element("div", "card-notes");
     (Array.isArray(candidate.reasons) ? candidate.reasons : []).forEach((reason) => notes.append(element("span", "reason", `+ ${reason}`)));
     (Array.isArray(candidate.caveats) ? candidate.caveats : []).forEach((caveat) => notes.append(element("span", "caveat", `! ${caveat}`)));
-    article.append(top, heading, recommendation, classification, buildChecks(candidate), signals, footer, notes);
+    const officialLineup = buildOfficialLineup(lineup);
+    article.append(top, heading, recommendation, classification, buildChecks(candidate), signals);
+    if (officialLineup) article.append(officialLineup);
+    article.append(footer, notes);
     return article;
   }
 
