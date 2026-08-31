@@ -9,9 +9,10 @@ test("a entrega pública é uma página estática e usa somente o RPC limitado",
   const script = read("docs/app.js");
   assert.match(page, /<script src="\.\/config\.js"><\/script>/);
   assert.match(script, /rpc\/get_public_tipster_dashboard/);
-  assert.match(script, /schemaVersion !== 8/);
+  assert.match(script, /schemaVersion !== 9/);
   assert.match(script, /credentials: "omit"/);
   assert.doesNotMatch(script, /v3\.football\.api-sports\.io|x-apisports-key|cron_secret|supabase_secret|service_role/i);
+  assert.doesNotMatch(script, /\bodd(s)?\b|bookmaker|impliedProbability/i);
 });
 
 test("o painel traz transparência de tiers, campeonatos e jogos detectados", () => {
