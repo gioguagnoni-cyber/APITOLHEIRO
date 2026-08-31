@@ -7,7 +7,7 @@
     <meta name="description" content="APITOLHEIRO — análise esportiva e controle pessoal de apostas.">
     <link rel="icon" href="./favicon.svg" type="image/svg+xml">
     <title>APITOLHEIRO</title>
-    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./styles.css?v=20260831-2">
   </head>
   <body>
     <div class="app-shell">
@@ -90,7 +90,7 @@
 
     <dialog id="bet-dialog" class="modal" aria-labelledby="bet-dialog-title"><form id="bet-entry-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span>ENTRADA PESSOAL</span><h2 id="bet-dialog-title">Registrar aposta</h2></div><button id="bet-close" type="button" aria-label="Fechar">×</button></div><div class="selected-fixture"><span id="bet-league">Competição</span><strong id="bet-fixture">Mandante × Visitante</strong><small>Mercado pessoal: vitória no tempo regulamentar</small></div><fieldset><legend>Em qual time você entrou?</legend><label><input name="chosen-side" value="home" type="radio" required><span id="bet-home-label">Mandante</span></label><label><input name="chosen-side" value="away" type="radio" required><span id="bet-away-label">Visitante</span></label></fieldset><div class="form-grid"><label><span>Valor da entrada (R$)</span><input id="bet-stake" type="number" min="0.01" max="1000000000" step="0.01" required></label><label><span>Odd oferecida pela casa</span><input id="bet-odds" type="number" min="1.001" max="1000" step="0.001" required></label></div><p class="form-message">A odd informada serve somente para calcular sua banca. Ela não altera o modelo, a probabilidade ou o Tier.</p><p id="bet-entry-message" class="form-message"></p><div class="modal-actions"><button class="button secondary" id="bet-cancel" type="button">Cancelar</button><button class="button primary" type="submit">Confirmar entrada</button></div></form></dialog>
 
-    <script src="./config.js"></script>
-    <script src="./app.js" defer></script>
+    <script src="./config.js?v=20260831"></script>
+    <script src="./app.js?v=20260831-2" defer></script>
   </body>
 </html>
