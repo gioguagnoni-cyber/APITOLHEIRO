@@ -7,14 +7,24 @@ const read = (path) => fs.readFileSync(new URL(`../${path}`, import.meta.url), "
 test("a entrega pública separa o feed esportivo do controle privado", () => {
   const page = read("docs/index.html");
   const script = read("docs/app.js");
+  const ownerControl = read("supabase/functions/owner-control/index.ts");
   assert.match(page, /<script src="\.\/config\.js\?v=[^"]+"><\/script>/);
   assert.match(page, /<script src="\.\/app\.js\?v=[^"]+" defer><\/script>/);
   assert.match(script, /rpc\/get_public_tipster_dashboard/);
   assert.match(script, /schemaVersion < 10/);
   assert.match(script, /functions\/v1\/owner-control/);
+  assert.match(script, /apitoleiro_device_token/);
+  assert.match(script, /window\.location\.hash/);
+  assert.match(script, /link individual de ativação/);
   assert.match(script, /credentials: "omit"/);
+  assert.match(ownerControl, /ALLOWED_ORIGINS/);
+  assert.match(ownerControl, /sb_publishable_/);
+  assert.match(ownerControl, /authorizeDevice/);
+  assert.match(ownerControl, /token_hash/);
+  assert.doesNotMatch(ownerControl, /claimDevice|claim_device/);
   assert.doesNotMatch(script, /v3\.football\.api-sports\.io|x-apisports-key|cron_secret|supabase_secret|service_role/i);
   assert.doesNotMatch(script, /bookmaker|impliedProbability|metrics\.market/i);
+  assert.doesNotMatch(ownerControl, /get_owner_access_secret|Senha do proprietário|constantTimeEquals/);
 });
 
 test("o painel traz transparência de tiers, campeonatos e jogos detectados", () => {
@@ -35,10 +45,10 @@ test("o painel traz transparência de tiers, campeonatos e jogos detectados", ()
   assert.match(script, /XI oficial/);
   assert.match(page, /data-tier="4"/);
   assert.match(page, /id="results"/);
-  assert.match(page, /id="owner-dialog"/);
   assert.match(page, /id="ai-settings-form"/);
   assert.match(script, /action, \.\.\.fields/);
-  assert.doesNotMatch(page, /owner-email|Enviar link de acesso/);
+  assert.doesNotMatch(page, /owner-email|owner-dialog|private-gate|Desbloquear|Enviar link de acesso|Senha do proprietário/);
+  assert.doesNotMatch(script, /ownerPassword|apitoleiro_owner_password|sessionStorage|openOwnerDialog|authenticate/);
   assert.doesNotMatch(script, /auth\/v1\/otp|signInWithOtp/);
 });
 
