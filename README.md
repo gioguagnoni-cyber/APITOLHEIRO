@@ -4,10 +4,10 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 
 ## O que a V1 faz
 
-- Às 23:30 BRT, varre todos os jogos do dia seguinte nas competições prioritárias já configuradas e publica um Tier 1–4 para cada jogo encontrado. A rotina reutiliza tabela e calendário da temporada por campeonato para calcular forma e mando de todos os confrontos com menos chamadas; previsões e odds entram enquanto houver orçamento seguro.
-- Mede forma nos últimos 10, recorte dos últimos 5 no mando relevante, diferença de tabela, odd de Match Winner, força do rival, baixas, escalação perto do início e um proxy de criação quando não há xG oficial.
+- Às 23:30 BRT, varre todos os jogos do dia seguinte nas competições prioritárias já configuradas e publica um Tier 1–4 para cada jogo encontrado. A rotina reutiliza tabela e calendário da temporada por campeonato para calcular forma e mando de todos os confrontos com menos chamadas; previsões entram enquanto houver orçamento seguro.
+- Mede forma nos últimos 10, recorte dos últimos 5 no mando relevante, diferença de tabela, força do rival, baixas, escalação perto do início e um proxy de criação quando não há xG oficial.
 - Pondera sinais disponíveis. Ausência de dados reduz a confiança; não vira sinal positivo.
-- Mostra Tier 1–4. Tier 1 exige estimativa >=75%, confiança de dados >=65% e odd entre 1,30 e 2,90. Os valores alimentam o score, não são filtros rígidos para os demais tiers. A tela mantém também os Tiers não qualificados, com o motivo e os critérios que passaram ou falharam.
+- Mostra Tier 1–4. As três regras obrigatórias iniciam em Tier 3; os sinais esportivos complementares podem elevar a Tier 2 ou 1. A estimativa de probabilidade e a confiança dos dados são informativas, não promessas de resultado. A tela mantém também os Tiers não qualificados, com o motivo e os critérios que passaram ou falharam.
 - Mantém cache por endpoint, registra todas as chamadas efetivas e reserva quota atomicamente antes de chamar o provedor.
 - Sincroniza o catálogo e agregados históricos do StatsBomb Open Data em uma Edge Function separada. São guardadas métricas derivadas por partida e por equipe (xG, finalizações, passes completos e pressões), nunca o payload bruto de eventos.
 - Usa a football-data.org como conferência oficial opcional de tabela e forma por competição. São até duas chamadas cacheáveis por competição presente na varredura. A fonte só substitui a posição de tabela quando os dois times são associados com segurança.
@@ -65,4 +65,4 @@ O banco já possui as migrações em supabase/migrations. A aplicação usa até
 
 ## Limites de dados
 
-Cobertura de odds, previsões, lesões, escalações e football-data.org varia por competição e plano. A ingestão usa cache por endpoint e interrompe novas chamadas ao atingir a margem de segurança. xG oficial não é presumido: a V1 sinaliza proxy de criação quando esse dado não estiver disponível. StatsBomb Open Data é uma base histórica seletiva, não uma fonte ao vivo.
+Cobertura de previsões, lesões, escalações e football-data.org varia por competição e plano. A ingestão usa cache por endpoint e interrompe novas chamadas ao atingir a margem de segurança. xG oficial não é presumido: a V1 sinaliza proxy de criação quando esse dado não estiver disponível. StatsBomb Open Data é uma base histórica seletiva, não uma fonte ao vivo.
