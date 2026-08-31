@@ -107,8 +107,6 @@
       criterios_sem_cobertura: "Não sugerido · dados incompletos",
       qualificado: "Qualificado",
       cobertura_insuficiente: "Cobertura insuficiente",
-      mercado_indisponivel: "Mercado indisponível",
-      odd_fora_da_faixa: "Odd fora da faixa",
       probabilidade_abaixo_meta: "Abaixo da meta",
       monitorar: "Monitorar",
       lineup_downgraded: "Rebaixado · escalação",
@@ -118,11 +116,10 @@
   }
 
   function checkValue(name, value) {
-    if (value === null || value === undefined || value === "") return name === "oddsRange" ? "sem odd" : "—";
+    if (value === null || value === undefined || value === "") return "—";
     if (["last10", "homeLast5"].includes(name) && typeof value === "object") return `${value.observedWins ?? "—"}/${value.observedMatches ?? "—"}`;
     if (name === "tableGap" && typeof value === "object") return value.observedPositions === null || value.observedPositions === undefined ? "—" : `${Number(value.observedPositions) >= 0 ? "+" : ""}${value.observedPositions}`;
     if (name === "coverageThreshold") return Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : "—";
-    if (name === "oddsRange") return Number.isFinite(Number(value)) ? formatNumber(value, 2) : "sem odd";
     return Number.isFinite(Number(value)) ? `${formatNumber(value)}%` : "—";
   }
 
@@ -130,7 +127,7 @@
     const checks = candidate.checks || {};
     const list = element("div", "decision-checks");
     const mandatory = ["last10", "homeLast5", "tableGap"].filter((name) => checks[name]);
-    (mandatory.length ? mandatory : ["modelThreshold", "coverageThreshold", "oddsRange"]).forEach((name) => {
+    (mandatory.length ? mandatory : ["modelThreshold", "coverageThreshold"]).forEach((name) => {
       const check = checks[name] || {};
       const passed = check.passed === true;
       const chip = element("div", `decision-check ${passed ? "pass" : "fail"}`);
@@ -250,12 +247,6 @@
     );
 
     const footer = element("div", "card-footer");
-    const odd = element("div", "odd-panel");
-    odd.append(
-      element("span", "", `Odd${candidate.bookmaker ? ` · ${candidate.bookmaker}` : ""}`),
-      element("strong", "", candidate.odds ? formatNumber(candidate.odds, 2) : "—"),
-      element("small", "", candidate.impliedProbability ? `${formatNumber(candidate.impliedProbability)}% implícita` : "mercado indisponível"),
-    );
     const confidence = element("div", "confidence-panel");
     const confidenceValue = Math.max(0, Math.min(1, Number(candidate.dataConfidence) || 0));
     const track = element("div", "confidence-track");
@@ -263,7 +254,7 @@
     bar.style.width = `${Math.round(confidenceValue * 100)}%`;
     track.append(bar);
     confidence.append(element("span", "", "Confiança dos dados"), track, element("small", "", `${Math.round(confidenceValue * 100)}% de sinais disponíveis`));
-    footer.append(odd, confidence);
+    footer.append(confidence);
 
     const notes = element("div", "card-notes");
     (Array.isArray(candidate.reasons) ? candidate.reasons : []).forEach((reason) => notes.append(element("span", "reason", `+ ${reason}`)));
@@ -540,7 +531,7 @@
       });
       if (!response.ok) throw new Error(`Feed indisponível (${response.status})`);
       const payload = await response.json();
-      if (!payload || payload.schemaVersion !== 8 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData || !payload.results) throw new Error("Formato de feed inválido");
+      if (!payload || payload.schemaVersion !== 9 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData || !payload.results) throw new Error("Formato de feed inválido");
       state.payload = payload;
       setSummary(payload);
       renderStatsBombSource(payload);
