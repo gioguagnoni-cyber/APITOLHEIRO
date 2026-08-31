@@ -11,12 +11,6 @@ type Prediction = {
     goals?: { home?: string | number | null; away?: string | number | null };
   };
 };
-type OddsResponse = {
-  bookmakers?: {
-    name?: string;
-    bets?: { name?: string; values?: { value?: string; odd?: string }[] }[];
-  }[];
-};
 type Injury = { team?: { id?: number } };
 type Lineup = { team?: { id?: number }; startXI?: unknown[] };
 
@@ -100,19 +94,6 @@ const tablePositions = (payload: StandingsResponse[] | null) => {
   return new Map(values.map((standing) => [standing.team.id, standing.rank]));
 };
 
-const findOdds = (payload: OddsResponse[] | null, favorite: "home" | "away") => {
-  const wanted = favorite === "home" ? ["Home", "1"] : ["Away", "2"];
-  for (const entry of payload || []) {
-    for (const bookmaker of entry.bookmakers || []) {
-      const market = bookmaker.bets?.find((bet) => /match winner|winner/i.test(bet.name || ""));
-      const value = market?.values?.find((candidate) => wanted.includes(candidate.value || ""));
-      const odds = safeNumber(value?.odd);
-      if (odds) return { odds, bookmaker: bookmaker.name || null };
-    }
-  }
-  return { odds: null, bookmaker: null };
-};
-
 const strengthLabel = (position: number | null) => {
   if (!position) return "indisponível" as const;
   if (position >= 17) return "muito baixa" as const;
@@ -176,7 +157,6 @@ const buildInsight = (
   fixture: ProviderFixture,
   positions: Map<number, number>,
   prediction: Prediction[] | null,
-  oddsPayload: OddsResponse[] | null,
   homeRecent: RecentMetrics | null,
   awayRecent: RecentMetrics | null,
   injuries: Injury[] | null,
@@ -195,12 +175,10 @@ const buildInsight = (
   const hasConfirmedLineup = (lineups || []).some((lineup) => lineup.team?.id === favoriteTeam.id && (lineup.startXI?.length || 0) >= 11);
   const lineupStatus = hasConfirmedLineup ? "confirmada" : lineups ? "pendente" : "indisponível";
   const predictionProbability = apiPercent(prediction, favorite);
-  const { odds, bookmaker } = findOdds(oddsPayload, favorite);
   const formRate = favoriteRecent?.total ? favoriteRecent.wins / favoriteRecent.total : null;
   const venueRate = favoriteRecent?.venueTotal ? favoriteRecent.venueWins / favoriteRecent.venueTotal : null;
   const tableGap = favoritePosition && opponentPosition ? opponentPosition - favoritePosition : null;
   const tableScore = tableGap === null ? null : clamp(0.5 + tableGap / 30);
-  const marketProbability = odds ? 1 / odds : null;
   const injuryScore = injuries ? clamp(0.58 + (opposingInjuries - favoriteInjuries) * 0.05) : null;
   const lineupScore = lineupStatus === "confirmada" ? 0.8 : lineupStatus === "pendente" ? 0.56 : null;
   const goalDifference = predictedGoalDifference(prediction, favorite);
@@ -214,7 +192,6 @@ const buildInsight = (
     [formRate, 0.18],
     [venueRate, 0.11],
     [tableScore, 0.16],
-    [marketProbability, 0.08],
     [injuryScore, 0.07],
     [lineupScore, 0.07],
     [xgScore, 0.09],
@@ -222,21 +199,18 @@ const buildInsight = (
   const availableWeight = inputs.reduce((total, [value, weight]) => total + (value === null ? 0 : weight), 0);
   const dataScore = inputs.reduce((total, [value, weight]) => total + (value === null ? 0 : value * weight), 0);
   const normalizedDataScore = availableWeight ? dataScore / availableWeight : 0.5;
-  const probability = Math.round(clamp(normalizedDataScore * 0.78 + (marketProbability ?? normalizedDataScore) * 0.22, 0.38, 0.92) * 100);
+  const probability = Math.round(clamp(normalizedDataScore, 0.38, 0.92) * 100);
   const confidence = Math.round(availableWeight * 100) / 100;
   const tier = tierFor(probability, confidence);
-  const oddsInRange = odds !== null && odds >= 1.3 && odds <= 2.9;
   const reasons = [
     formRate !== null ? "Forma recente: " + favoriteRecent?.wins + " vitórias nos últimos " + favoriteRecent?.total + "." : null,
     venueRate !== null ? "Recorte de mando: " + favoriteRecent?.venueWins + " vitórias em " + favoriteRecent?.venueTotal + "." : null,
     tableGap !== null ? "Diferença de tabela: " + (tableGap >= 0 ? "+" : "") + tableGap + " posições." : null,
-    odds ? "Odd observada: " + odds.toFixed(2) + "." : null,
     predictionProbability !== null ? "Previsão externa usada como um dos sinais: " + predictionProbability + "%." : null,
   ].filter((reason): reason is string => Boolean(reason));
   const caveats = [
     xgProxy === null ? "xG indisponível; o modelo não inventa esse indicador." : "Indicador de criação em modo proxy; não equivale a xG oficial.",
     lineupStatus !== "confirmada" ? "Escalação ainda não confirmada." : null,
-    oddsInRange ? null : "Odd fora da faixa operacional de 1,30–2,90 ou indisponível.",
   ].filter((caveat): caveat is string => Boolean(caveat));
 
   return {
@@ -249,14 +223,11 @@ const buildInsight = (
     favorite,
     favoriteName: favoriteTeam.name,
     recommendedMarket: favorite === "home" ? "Vitória mandante" : "Vitória visitante",
-    bookmaker,
-    odds,
-    impliedProbability: marketProbability ? Math.round(marketProbability * 100) : null,
     probability,
     dataConfidence: confidence,
     score: Math.round(normalizedDataScore * 100),
     tier,
-    eligible: probability >= 75 && oddsInRange && confidence >= 0.65,
+    eligible: probability >= 75 && confidence >= 0.65,
     sourceUpdatedAt: new Date().toISOString(),
     metrics: {
       last10: favoriteRecent,
@@ -337,9 +308,6 @@ const persistInsight = async (fixture: ProviderFixture, insight: FixtureInsight)
       eligible: insight.eligible,
       favorite_side: insight.favorite,
       recommended_market: insight.recommendedMarket,
-      bookmaker: insight.bookmaker,
-      odds: insight.odds,
-      implied_probability: insight.impliedProbability,
       metrics: insight.metrics,
       reasons: insight.reasons,
       caveats: insight.caveats,
@@ -385,7 +353,6 @@ export const runDailyAnalysis = async () => {
         season: fixture.league.season,
       }, 60);
       const prediction = await client.getOptional<Prediction[]>("predictions", { fixture: fixture.fixture.id }, 60);
-      const oddsPayload = await client.getOptional<OddsResponse[]>("odds", { fixture: fixture.fixture.id }, 180);
       const homeFixtures = await client.getOptional<ProviderFixture[]>("fixtures", { team: fixture.teams.home.id, last: 20 }, 360);
       const awayFixtures = await client.getOptional<ProviderFixture[]>("fixtures", { team: fixture.teams.away.id, last: 20 }, 360);
       const injuries = await client.getOptional<Injury[]>("injuries", { fixture: fixture.fixture.id }, 240);
@@ -396,7 +363,6 @@ export const runDailyAnalysis = async () => {
         fixture,
         tablePositions(standings),
         prediction,
-        oddsPayload,
         recentMetrics(homeFixtures, fixture.teams.home.id, true),
         recentMetrics(awayFixtures, fixture.teams.away.id, false),
         injuries,
