@@ -2,65 +2,56 @@
   "use strict";
 
   const config = window.APITOLHEIRO_PUBLIC_CONFIG;
-  const state = { payload: null, tier: "all", league: "all" };
-  const dashboard = document.querySelector("#dashboard");
-  const screening = document.querySelector("#screening");
-  const screeningMeta = document.querySelector("#screening-meta");
-  const statsbombSource = document.querySelector("#statsbomb-source");
-  const statsbombStatus = document.querySelector("#statsbomb-status");
-  const footballDataSource = document.querySelector("#football-data-source");
-  const footballDataStatus = document.querySelector("#football-data-status");
-  const publicationCopy = document.querySelector("#publication-copy");
-  const results = document.querySelector("#results");
-  const resultsMeta = document.querySelector("#results-meta");
-  const refreshButton = document.querySelector("#refresh-button");
-  const leagueFilter = document.querySelector("#league-filter");
-  const tierButtons = [...document.querySelectorAll("[data-tier]")];
-  const ownerAccess = document.querySelector("#owner-access");
-  const ownerDialog = document.querySelector("#owner-dialog");
-  const ownerClose = document.querySelector("#owner-close");
-  const ownerEmail = document.querySelector("#owner-email");
-  const ownerLink = document.querySelector("#owner-link");
-  const ownerAuthPanel = document.querySelector("#owner-auth-panel");
-  const ownerAuthMessage = document.querySelector("#owner-auth-message");
-  const aiForm = document.querySelector("#ai-settings-form");
-  const aiProvider = document.querySelector("#ai-provider");
-  const aiModel = document.querySelector("#ai-model");
-  const aiApiKey = document.querySelector("#ai-api-key");
-  const aiEnabled = document.querySelector("#ai-enabled");
-  const aiMaxReviews = document.querySelector("#ai-max-reviews");
-  const aiSettingsStatus = document.querySelector("#ai-settings-status");
-  const ownerSignout = document.querySelector("#owner-signout");
-  let ownerToken = sessionStorage.getItem("apitoleiro_owner_access_token") || "";
-  const numbers = {
-    screened: document.querySelector("#screened-count"),
-    analyzed: document.querySelector("#analyzed-count"),
-    verified: document.querySelector("#verified-count"),
-    qualified: document.querySelector("#qualified-count"),
-    updated: document.querySelector("#source-updated"),
+  const state = {
+    payload: null,
+    tier: "all",
+    league: "all",
+    screeningLeague: "all",
+    ownerPassword: sessionStorage.getItem("apitoleiro_owner_password") || "",
+    ownerData: null,
+    selectedCandidate: null,
+    pendingCandidate: null,
   };
 
-  const ptDate = new Intl.DateTimeFormat("pt-BR", {
-    timeZone: "America/Sao_Paulo", weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-  });
-  const ptShortDate = new Intl.DateTimeFormat("pt-BR", {
-    timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-  });
+  const $ = (selector) => document.querySelector(selector);
+  const $$ = (selector) => [...document.querySelectorAll(selector)];
+  const dom = {
+    dashboard: $("#dashboard"), screening: $("#screening"), screeningMeta: $("#screening-meta"),
+    results: $("#results"), resultsMeta: $("#results-meta"), refresh: $("#refresh-button"),
+    league: $("#league-filter"), screeningLeague: $("#screening-league-filter"),
+    updated: $("#source-updated"), viewTitle: $("#view-title"), viewEyebrow: $("#view-eyebrow"),
+    ownerAccess: $("#owner-access"), ownerDialog: $("#owner-dialog"), ownerForm: $("#owner-login-form"),
+    ownerPassword: $("#owner-password"), ownerMessage: $("#owner-auth-message"), ownerDot: $("#owner-state-dot"),
+    ownerLabel: $("#owner-state-label"), ownerCopy: $("#owner-state-copy"), openBadge: $("#open-bets-badge"),
+    betDialog: $("#bet-dialog"), betForm: $("#bet-entry-form"), betMessage: $("#bet-entry-message"),
+    betsList: $("#bets-list"), bankrollForm: $("#bankroll-form"), bankrollMessage: $("#bankroll-message"),
+    aiForm: $("#ai-settings-form"), aiProvider: $("#ai-provider"), aiModel: $("#ai-model"),
+    aiKey: $("#ai-api-key"), aiEnabled: $("#ai-enabled"), aiMax: $("#ai-max-reviews"),
+    aiStatus: $("#ai-settings-status"), aiConnection: $("#ai-connection-state"),
+  };
 
-  function text(value) {
-    return document.createTextNode(String(value ?? "—"));
-  }
+  const ptDate = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+  const percent = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  function text(value) { return document.createTextNode(String(value ?? "—")); }
   function element(tag, className, content) {
     const node = document.createElement(tag);
     if (className) node.className = className;
     if (content !== undefined && content !== null) node.append(text(content));
     return node;
   }
+  function number(value, digits = 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed.toFixed(digits) : "—";
+  }
+  function currency(value) { return money.format(Number(value) || 0); }
+  function leagueKey(item) { return `${item.country || "Internacional"}::${item.league || "Competição"}`; }
+  function leagueLabel(item) { return `${item.league || "Competição"} · ${item.country || "Internacional"}`; }
 
-  function labelValue(label, value, caption, tone = "") {
-    const box = element("div", `signal ${tone}`.trim());
-    box.append(element("span", "", label), element("strong", "", value), element("small", "", caption));
+  function emptyState(title, description) {
+    const box = element("div", "empty-state");
+    box.append(element("h3", "", title), element("p", "", description));
     return box;
   }
 
@@ -68,561 +59,358 @@
     if (!metrics || metrics.unavailable) return { main: "—", detail: "sem histórico" };
     const total = venue ? metrics.venueTotal : metrics.total;
     const wins = venue ? metrics.venueWins : metrics.wins;
-    if (!Number.isFinite(total) || !Number.isFinite(wins)) return { main: "—", detail: "sem histórico" };
     const draws = venue ? metrics.venueDraws : metrics.draws;
     const losses = venue ? metrics.venueLosses : metrics.losses;
-    const goalsFor = venue ? metrics.venueGoalsFor : metrics.goalsFor;
-    const goalsAgainst = venue ? metrics.venueGoalsAgainst : metrics.goalsAgainst;
-    return {
-      main: `${wins}V ${draws ?? "—"}E ${losses ?? "—"}D`,
-      detail: `${total} jogos · ${goalsFor ?? "—"} GF / ${goalsAgainst ?? "—"} GA`,
-    };
+    if (!Number.isFinite(Number(total)) || !Number.isFinite(Number(wins))) return { main: "—", detail: "sem histórico" };
+    return { main: `${wins}V ${draws ?? "—"}E ${losses ?? "—"}D`, detail: `${total} jogos` };
   }
 
-  function strengthTone(value) {
-    if (String(value).includes("baixa")) return "positive";
-    if (String(value).includes("alta")) return "negative";
-    return "";
+  function metric(label, value, detail, tone = "") {
+    const box = element("div", `metric ${tone}`.trim());
+    box.append(element("span", "", label), element("strong", "", value), element("small", "", detail));
+    return box;
   }
 
-  function formatNumber(value, digits = 0) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric.toFixed(digits) : "—";
+  function mandatoryItem(check, fallbackLabel, type) {
+    const value = check?.value;
+    let display = "—";
+    if ((type === "last10" || type === "homeLast5") && value && typeof value === "object") display = `${value.observedWins ?? "—"}/${value.observedMatches ?? "—"}`;
+    if (type === "tableGap" && value && typeof value === "object" && value.observedPositions !== null && value.observedPositions !== undefined) display = `${Number(value.observedPositions) >= 0 ? "+" : ""}${value.observedPositions}`;
+    const passed = check?.passed === true;
+    const item = element("div", `mandatory-item ${passed ? "pass" : "fail"}`);
+    item.append(element("span", "", check?.label || fallbackLabel), element("strong", "", display), element("small", "", passed ? "atendida" : "não atendida"));
+    return item;
   }
 
-  function leagueKey(item) {
-    return `${item.country || "Internacional"}::${item.league || "Competição"}`;
+  function classification(candidate) {
+    if (candidate.classification === "lineup_suspended") return "Suspensa após escalação";
+    if (candidate.classification === "lineup_downgraded") return "Rebaixada após escalação";
+    return candidate.eligible ? "Sugestão qualificada" : "Somente análise";
   }
 
-  function leagueLabel(item) {
-    return `${item.league || "Competição"} · ${item.country || "Internacional"}`;
-  }
-
-  function classificationText(candidate) {
-    const labels = {
-      sugerido: "Sugerido",
-      last10_insuficiente: "Não sugerido · últimos 10",
-      home_last5_insuficiente: "Não sugerido · mando",
-      tabela_insuficiente: "Não sugerido · tabela",
-      criterios_sem_cobertura: "Não sugerido · dados incompletos",
-      qualificado: "Qualificado",
-      cobertura_insuficiente: "Cobertura insuficiente",
-      probabilidade_abaixo_meta: "Abaixo da meta",
-      monitorar: "Monitorar",
-      lineup_downgraded: "Rebaixado · escalação",
-      lineup_suspended: "Suspenso · escalação",
-    };
-    return labels[candidate.classification] || "Analisado";
-  }
-
-  function checkValue(name, value) {
-    if (value === null || value === undefined || value === "") return "—";
-    if (["last10", "homeLast5"].includes(name) && typeof value === "object") return `${value.observedWins ?? "—"}/${value.observedMatches ?? "—"}`;
-    if (name === "tableGap" && typeof value === "object") return value.observedPositions === null || value.observedPositions === undefined ? "—" : `${Number(value.observedPositions) >= 0 ? "+" : ""}${value.observedPositions}`;
-    if (name === "coverageThreshold") return Number.isFinite(Number(value)) ? `${Math.round(Number(value) * 100)}%` : "—";
-    return Number.isFinite(Number(value)) ? `${formatNumber(value)}%` : "—";
-  }
-
-  function buildChecks(candidate) {
-    const checks = candidate.checks || {};
-    const list = element("div", "decision-checks");
-    const mandatory = ["last10", "homeLast5", "tableGap"].filter((name) => checks[name]);
-    (mandatory.length ? mandatory : ["modelThreshold", "coverageThreshold"]).forEach((name) => {
-      const check = checks[name] || {};
-      const passed = check.passed === true;
-      const chip = element("div", `decision-check ${passed ? "pass" : "fail"}`);
-      chip.append(
-        element("span", "", check.label || "Critério"),
-        element("strong", "", checkValue(name, check.value)),
-        element("small", "", passed ? "regra obrigatória atendida" : "regra obrigatória não atendida"),
-      );
-      list.append(chip);
-    });
-    return list;
-  }
-
-  function buildOfficialLineup(lineup) {
-    const official = lineup.officialLineup || {};
-    const favorite = official.favorite || {};
+  function officialLineup(lineup) {
+    const favorite = lineup?.officialLineup?.favorite || {};
     const starters = Array.isArray(favorite.starters) ? favorite.starters : [];
     if (!starters.length) return null;
     const section = element("section", "official-lineup");
-    const title = element("div", "official-lineup-title");
-    title.append(
-      element("strong", "", `XI oficial · ${favorite.team || "lado sugerido"}`),
-      element("span", "", favorite.formation || "formação não informada"),
-    );
-    const players = element("div", "official-lineup-players");
-    starters.forEach((player) => {
-      const chip = element("span", "", player.name || "Jogador não identificado");
-      if (player.position) chip.title = player.position;
-      players.append(chip);
-    });
-    section.append(title, players);
+    section.append(element("h4", "", `XI oficial · ${favorite.team || "lado sugerido"}${favorite.formation ? ` · ${favorite.formation}` : ""}`));
+    const players = element("div", "lineup-players");
+    starters.forEach((player) => players.append(element("span", "", player.name || "Jogador não identificado")));
+    section.append(players);
     return section;
   }
 
   function buildCandidate(candidate) {
     const metrics = candidate.metrics || {};
     const last10 = record(metrics.last10, false);
-    const venue = record(metrics.venueLast5, true);
-    const favoriteIsHome = candidate.favorite === "home";
-    const xg = metrics.xg || {};
-    const lineup = metrics.lineup || {};
-    const lineupReview = lineup.lineupReview || {};
+    const last5 = record(metrics.venueLast5, true);
     const table = metrics.table || {};
+    const xg = metrics.xg || {};
     const prediction = metrics.prediction || {};
     const injuries = metrics.injuries || {};
-    const sources = metrics.sources || {};
+    const lineup = metrics.lineup || {};
+    const review = lineup.lineupReview || {};
     const statsbomb = metrics.statsbomb || {};
-    const footballData = metrics.footballData || {};
-    const statsbombAvailable = statsbomb.status === "histórico";
-    const statsbombValue = statsbombAvailable && Number.isFinite(Number(statsbomb.xgForPerMatch))
-      ? `${formatNumber(statsbomb.xgForPerMatch, 2)} xG`
-      : (statsbomb.status || "sem cobertura");
-    const statsbombCaption = statsbombAvailable
-      ? `${statsbomb.favoriteMatches || 0} partidas históricas`
-      : (statsbomb.label || "não entra no score");
-    const footballDataVerified = footballData.status === "confirmado";
-    const footballDataValue = footballDataVerified
-      ? `Tabela ${footballData.tableSource || "oficial"}`
-      : (footballData.status || "sem cobertura");
-    const footballDataCaption = footballDataVerified
-      ? `${footballData.competitionCode || "competição"} · ${footballData.favoriteRecentMatches || 0} jogos recentes`
-      : (footballData.label || "não altera o score");
-    const lineupStatus = lineupReview.status || lineup.status || "indisponível";
-    const lineupTone = ["downgraded", "suspended"].includes(lineupStatus) ? "negative" : lineupStatus === "confirmed" || lineupStatus === "unchanged" || lineup.status === "confirmada" ? "positive" : "";
-    const lineupCaption = lineupReview.checkedAt
-      ? `${lineupReview.startersConfirmed || "—"}/11 titulares · ${ptShortDate.format(new Date(lineupReview.checkedAt))}`
-      : lineup.unavailableCount === null || lineup.unavailableCount === undefined
-        ? "reconsulta pendente"
-        : `${lineup.unavailableCount} baixas listadas`;
-    const lineupValue = lineupStatus === "downgraded" ? "rebaixada" : lineupStatus === "suspended" ? "suspensa" : lineupStatus;
-    const sourceStamp = sources.apiFootball?.collectedAt || candidate.sourceUpdatedAt;
-    const article = element("article", `candidate-card tier-${candidate.tier}`);
+    const official = metrics.footballData || {};
+    const checks = candidate.checks || {};
+    const card = element("article", "candidate-card");
 
-    const top = element("div", "card-topline");
-    top.append(
-      element("span", "", leagueLabel(candidate)),
-      element("span", "", candidate.kickoff ? ptDate.format(new Date(candidate.kickoff)) : "horário indisponível"),
-    );
-
-    const heading = element("div", "fixture-heading");
-    const home = element("div", "team-side home");
-    home.append(element("span", "team-avatar", String(candidate.home?.name || "?").slice(0, 1)));
-    const homeCopy = element("div");
-    homeCopy.append(element("strong", "", candidate.home?.name || "Mandante"), element("small", "", "mandante"));
-    home.append(homeCopy);
-    const away = element("div", "team-side away");
-    const awayCopy = element("div");
-    awayCopy.append(element("strong", "", candidate.away?.name || "Visitante"), element("small", "", "visitante"));
-    away.append(awayCopy, element("span", "team-avatar", String(candidate.away?.name || "?").slice(0, 1)));
-    heading.append(home, element("div", "versus", "×"), away);
-
-    const recommendation = element("div", "recommendation");
-    const favorite = element("div");
-    favorite.append(element("span", "eyebrow", "Lado modelado"), element("strong", "", candidate.favoriteName), element("small", "", candidate.recommendedMarket));
+    const head = element("div", "candidate-head");
+    const competition = element("div", "candidate-competition");
+    competition.append(element("span", "", leagueLabel(candidate)), element("strong", "", `${candidate.home?.name || "Mandante"} × ${candidate.away?.name || "Visitante"}`), element("small", "", candidate.kickoff ? ptDate.format(new Date(candidate.kickoff)) : "horário indisponível"));
+    const pick = element("div", "candidate-pick");
+    pick.append(element("span", "", "Lado modelado"), element("strong", "", candidate.favoriteName || "—"), element("small", "", candidate.recommendedMarket || "vitória no tempo regulamentar"));
     const probability = element("div", "probability");
-    probability.append(element("span", "", `${formatNumber(candidate.probability)}%`), element("small", "", "probabilidade do modelo"));
-    recommendation.append(favorite, probability, element("div", `tier-badge tier-${candidate.tier}`, `Tier ${candidate.tier}`));
+    probability.append(element("strong", "", `${number(candidate.probability)}%`), element("small", "", "modelo"));
+    const tier = element("span", "tier-tag", `Tier ${candidate.tier || 4}`);
+    const actions = element("div", "candidate-actions");
+    const entry = element("button", "entry-button", candidate.eligible ? "Entrada realizada" : "Não qualificado");
+    entry.type = "button";
+    entry.disabled = candidate.eligible !== true;
+    if (candidate.eligible) entry.addEventListener("click", () => openBet(candidate));
+    actions.append(entry);
+    head.append(competition, pick, probability, tier, actions);
 
-    const classification = element("div", `classification ${candidate.eligible ? "qualified" : "not-qualified"}`);
-    classification.append(element("strong", "", classificationText(candidate)), element("span", "", candidate.classificationLabel || "Sem justificativa disponível."));
+    const mandatory = element("div", "mandatory-row");
+    mandatory.append(mandatoryItem(checks.last10, "Últimos 10", "last10"), mandatoryItem(checks.homeLast5, "Últimos 5 em casa", "homeLast5"), mandatoryItem(checks.tableGap, "Diferença de tabela", "tableGap"));
 
-    const signals = element("div", "signal-grid");
-    signals.append(
-      labelValue("Últimos 10", last10.main, last10.detail),
-      labelValue("Últimos 5 no mando", venue.main, favoriteIsHome ? "em casa" : "fora de casa"),
-      labelValue("Dif. de tabela", metrics.tableGap === null || metrics.tableGap === undefined ? "—" : `${Number(metrics.tableGap) >= 0 ? "+" : ""}${metrics.tableGap}`, "posições"),
-      labelValue("Tabela", table.homePosition && table.awayPosition ? `${table.homePosition}º × ${table.awayPosition}º` : "—", table.source || "posições indisponíveis"),
-      labelValue("Força rival", metrics.opponentStrength || "indisponível", "proxy de tabela", strengthTone(metrics.opponentStrength)),
-      labelValue(xg.mode === "xg" ? "xG diferencial" : "Criação", xg.value === null || xg.value === undefined ? "—" : `${Number(xg.value) > 0 ? "+" : ""}${formatNumber(xg.value, 2)}`, xg.mode === "proxy" ? "proxy de criação" : (xg.mode || "indisponível")),
-      labelValue("Previsão externa", prediction.favoriteProbability === null || prediction.favoriteProbability === undefined ? "—" : `${formatNumber(prediction.favoriteProbability)}%`, prediction.source || "API-Football"),
-      labelValue("Baixas", injuries.favoriteCount === null || injuries.favoriteCount === undefined ? "—" : `${injuries.favoriteCount} × ${injuries.opponentCount ?? "—"}`, "sugerido × adversário"),
-      labelValue("Escalação oficial", lineupValue, lineupCaption, lineupTone),
-      labelValue("Ajuste pré-jogo", lineupReview.probabilityDelta === null || lineupReview.probabilityDelta === undefined ? "—" : `${Number(lineupReview.probabilityDelta) > 0 ? "+" : ""}${formatNumber(lineupReview.probabilityDelta)} pp`, lineupReview.decision || "aguarda escalação oficial", lineupTone),
-      labelValue("StatsBomb", statsbombValue, statsbombCaption, statsbombAvailable ? "positive" : ""),
-      labelValue("football-data.org", footballDataValue, footballDataCaption, footballDataVerified ? "positive" : ""),
-      labelValue("Coleta", sourceStamp ? ptShortDate.format(new Date(sourceStamp)) : "—", sources.apiFootball?.provider || "fonte indisponível"),
+    const lineupStatus = review.status || lineup.status || "pendente";
+    const lineupTone = ["suspended", "downgraded"].includes(lineupStatus) ? "negative" : ["confirmed", "unchanged", "confirmada"].includes(lineupStatus) ? "positive" : "";
+    const grid = element("div", "metrics-grid");
+    grid.append(
+      metric("Últimos 10", last10.main, last10.detail),
+      metric("Últimos 5 no mando", last5.main, candidate.favorite === "home" ? "em casa" : "fora"),
+      metric("Tabela", table.homePosition && table.awayPosition ? `${table.homePosition}º × ${table.awayPosition}º` : "—", table.source || "sem posição"),
+      metric("Diferença", metrics.tableGap === null || metrics.tableGap === undefined ? "—" : `${Number(metrics.tableGap) >= 0 ? "+" : ""}${metrics.tableGap}`, "posições"),
+      metric("Força rival", metrics.opponentStrength || "—", "proxy relativo"),
+      metric(xg.mode === "xg" ? "xG diferencial" : "Criação", xg.value === null || xg.value === undefined ? "—" : `${Number(xg.value) > 0 ? "+" : ""}${number(xg.value, 2)}`, xg.mode || "sem cobertura"),
+      metric("Previsão externa", prediction.favoriteProbability === null || prediction.favoriteProbability === undefined ? "—" : `${number(prediction.favoriteProbability)}%`, prediction.source || "API-Football"),
+      metric("Baixas", injuries.favoriteCount === null || injuries.favoriteCount === undefined ? "—" : `${injuries.favoriteCount} × ${injuries.opponentCount ?? "—"}`, "sugerido × rival"),
+      metric("Escalação", lineupStatus, review.checkedAt ? `${review.startersConfirmed || "—"}/11 · ${ptDate.format(new Date(review.checkedAt))}` : "reconsulta pendente", lineupTone),
+      metric("Ajuste pré-jogo", review.probabilityDelta === null || review.probabilityDelta === undefined ? "—" : `${Number(review.probabilityDelta) > 0 ? "+" : ""}${number(review.probabilityDelta)} pp`, review.decision || "aguarda XI", lineupTone),
+      metric("StatsBomb", statsbomb.status || "sem cobertura", Number.isFinite(Number(statsbomb.xgForPerMatch)) ? `${number(statsbomb.xgForPerMatch, 2)} xG histórico` : "histórico agregado"),
+      metric("football-data.org", official.status || "sem cobertura", official.competitionCode || "conferência oficial"),
     );
 
-    const footer = element("div", "card-footer");
-    const confidence = element("div", "confidence-panel");
-    const confidenceValue = Math.max(0, Math.min(1, Number(candidate.dataConfidence) || 0));
-    const track = element("div", "confidence-track");
-    const bar = element("i");
-    bar.style.width = `${Math.round(confidenceValue * 100)}%`;
-    track.append(bar);
-    confidence.append(element("span", "", "Confiança dos dados"), track, element("small", "", `${Math.round(confidenceValue * 100)}% de sinais disponíveis`));
-    footer.append(confidence);
-
-    const notes = element("div", "card-notes");
-    (Array.isArray(candidate.reasons) ? candidate.reasons : []).forEach((reason) => notes.append(element("span", "reason", `+ ${reason}`)));
-    (Array.isArray(candidate.caveats) ? candidate.caveats : []).forEach((caveat) => notes.append(element("span", "caveat", `! ${caveat}`)));
-    const officialLineup = buildOfficialLineup(lineup);
-    article.append(top, heading, recommendation, classification, buildChecks(candidate), signals);
-    if (officialLineup) article.append(officialLineup);
-    article.append(footer, notes);
-    return article;
+    const foot = element("div", "candidate-foot");
+    const notes = element("div", "candidate-notes");
+    (candidate.reasons || []).slice(0, 5).forEach((item) => notes.append(element("span", "", `✓ ${item}`)));
+    (candidate.caveats || []).slice(0, 5).forEach((item) => notes.append(element("span", "warning", `! ${item}`)));
+    const status = element("div", "lineup-summary", `${classification(candidate)} · ${Math.round((Number(candidate.dataConfidence) || 0) * 100)}% de cobertura`);
+    foot.append(notes, status);
+    card.append(head, mandatory, grid);
+    const xi = officialLineup(lineup);
+    if (xi) card.append(xi);
+    card.append(foot);
+    return card;
   }
 
-  function emptyState(title, description, failed) {
-    const box = element("div", `empty-state${failed ? " failed" : ""}`);
-    if (!failed) box.append(element("span", "empty-pulse"));
-    box.append(element("h2", "", title), element("p", "", description));
-    return box;
-  }
+  function matching(item, key) { return key === "all" || leagueKey(item) === key; }
 
-  function matchingLeague(item) {
-    return state.league === "all" || leagueKey(item) === state.league;
+  function renderCandidates() {
+    dom.dashboard.replaceChildren();
+    if (!state.payload) return dom.dashboard.append(emptyState("Sem leitura", "O feed público ainda não respondeu."));
+    const candidates = (state.payload.candidates || []).filter((item) => matching(item, state.league)).filter((item) => state.tier === "all" || String(item.tier) === state.tier);
+    if (!candidates.length) return dom.dashboard.append(emptyState("Nenhum jogo neste recorte", "Altere o Tier ou o campeonato. A tela “Jogos filtrados” mostra todos os jogos encontrados."));
+    const list = element("div", "candidate-list");
+    candidates.forEach((candidate) => list.append(buildCandidate(candidate)));
+    dom.dashboard.append(list);
   }
 
   function renderScreening() {
-    screening.replaceChildren();
-    const payload = state.payload;
-    if (!payload) return;
-    const fixtures = (Array.isArray(payload.screenedFixtures) ? payload.screenedFixtures : []).filter(matchingLeague);
-    screeningMeta.textContent = fixtures.length
-      ? `${fixtures.length} jogo(s) detectado(s) no recorte atual. Jogos priorizados recebem Tier; os demais permanecem visíveis como “fora do escopo”, sem consumir quota.`
-      : "Nenhum jogo detectado para o campeonato selecionado na última varredura.";
-    if (!fixtures.length) {
-      screening.append(emptyState("Sem jogos no recorte.", "Altere o campeonato ou aguarde a próxima varredura cacheada.", false));
-      return;
-    }
-    const table = element("div", "screen-table");
-    const header = element("div", "screen-row screen-head");
-    ["Campeonato", "Jogo", "Horário", "Situação", "Decisão"].forEach((label) => header.append(element("span", "", label)));
+    dom.screening.replaceChildren();
+    const fixtures = (state.payload?.screenedFixtures || []).filter((item) => matching(item, state.screeningLeague));
+    dom.screeningMeta.textContent = fixtures.length ? `${fixtures.length} jogo(s) no recorte atual.` : "Nenhum jogo no recorte atual.";
+    if (!fixtures.length) return dom.screening.append(emptyState("Nenhum jogo encontrado", "Aguarde a próxima rotina ou selecione outro campeonato."));
+    const table = element("div", "data-table");
+    const header = element("div", "table-row header");
+    ["Campeonato", "Jogo", "Horário", "Situação", "Motivo"].forEach((label) => header.append(element("span", "", label)));
     table.append(header);
     fixtures.forEach((fixture) => {
-      const row = element("div", "screen-row");
-      const competition = element("div", "screen-competition");
-      competition.append(element("strong", "", fixture.league || "Competição"), element("small", "", fixture.country || "Internacional"));
-      const match = element("div", "screen-match");
-      match.append(element("strong", "", `${fixture.homeName || "Mandante"} × ${fixture.awayName || "Visitante"}`));
-      const kickoff = element("span", "screen-kickoff", fixture.kickoff ? ptShortDate.format(new Date(fixture.kickoff)) : "—");
+      const row = element("div", "table-row");
+      const league = element("div"); league.append(element("strong", "", fixture.league || "Competição"), element("small", "", fixture.country || "Internacional"));
+      const match = element("div"); match.append(element("strong", "", `${fixture.homeName || "Mandante"} × ${fixture.awayName || "Visitante"}`));
+      const time = element("span", "", fixture.kickoff ? ptDate.format(new Date(fixture.kickoff)) : "—");
       const analyzed = fixture.analysisStatus === "analisado";
-      const outOfScope = fixture.analysisStatus === "fora_de_escopo";
-      const status = element("div", `screen-status ${analyzed ? "analyzed" : "pending"}`);
-      if (analyzed) {
-        status.append(element("strong", "", `Analisado · Tier ${fixture.tier}`), element("small", "", `${formatNumber(fixture.probability)}% · ${Math.round((Number(fixture.dataConfidence) || 0) * 100)}% cobertura`));
-      } else if (outOfScope) {
-        status.append(element("strong", "", "Fora do escopo"), element("small", "", "campeonato não priorizado"));
-      } else {
-        status.append(element("strong", "", "Aguardando publicação"), element("small", "", "rotina noturna pendente"));
-      }
-      const decision = element("div", "screen-decision", analyzed ? (fixture.classificationLabel || "Analisado") : fixture.screeningReason);
-      row.append(competition, match, kickoff, status, decision);
-      table.append(row);
+      const status = element("span", "status-label", analyzed ? `Tier ${fixture.tier}` : fixture.analysisStatus === "fora_de_escopo" ? "Fora do escopo" : "Aguardando");
+      const reason = element("span", "", analyzed ? (fixture.classificationLabel || `${number(fixture.probability)}%`) : (fixture.screeningReason || "sem publicação"));
+      row.append(league, match, time, status, reason); table.append(row);
     });
-    screening.append(table);
+    dom.screening.append(table);
   }
 
-  function render() {
-    dashboard.replaceChildren();
-    const payload = state.payload;
-    if (!payload) {
-      dashboard.append(emptyState("Ainda não há leitura para exibir.", "O feed público não retornou uma análise.", false));
-      return;
-    }
-    const candidates = (Array.isArray(payload.candidates) ? payload.candidates : [])
-      .filter((candidate) => matchingLeague(candidate))
-      .filter((candidate) => state.tier === "all" || String(candidate.tier) === state.tier);
-    if (!candidates.length) {
-      const filtered = state.tier !== "all";
-      const title = filtered ? `Nenhuma análise Tier ${state.tier} neste recorte.` : "Nenhuma análise detalhada neste recorte.";
-      const details = filtered
-        ? "Altere o tier ou o campeonato. O mapa abaixo mantém os jogos que aguardam a publicação noturna."
-        : "Ainda não existe uma publicação concluída para este recorte. O mapa abaixo mostra o estado da varredura.";
-      dashboard.append(emptyState(title, details, false));
-    } else {
-      const grid = element("section", "candidate-grid");
-      candidates.forEach((candidate) => grid.append(buildCandidate(candidate)));
-      dashboard.append(grid);
-    }
-    renderScreening();
-  }
-
-  function syncLeagueOptions(payload) {
-    const items = [...(Array.isArray(payload.candidates) ? payload.candidates : []), ...(Array.isArray(payload.screenedFixtures) ? payload.screenedFixtures : [])];
-    const unique = new Map();
-    items.forEach((item) => unique.set(leagueKey(item), leagueLabel(item)));
-    leagueFilter.replaceChildren();
-    const all = element("option", "", "Todos os campeonatos");
-    all.value = "all";
-    leagueFilter.append(all);
-    [...unique.entries()].sort((left, right) => left[1].localeCompare(right[1], "pt-BR")).forEach(([key, label]) => {
-      const option = element("option", "", label);
-      option.value = key;
-      leagueFilter.append(option);
-    });
-    if (!unique.has(state.league)) state.league = "all";
-    leagueFilter.value = state.league;
-  }
-
-  function setSummary(payload) {
-    numbers.screened.textContent = String(payload.screenedCount ?? 0);
-    numbers.analyzed.textContent = String(payload.analyzedCount ?? 0);
-    numbers.verified.textContent = String(payload.verifiedCount ?? 0);
-    numbers.qualified.textContent = String(payload.qualifiedCount ?? 0);
-    numbers.updated.textContent = payload.sourceUpdatedAt ? ptShortDate.format(new Date(payload.sourceUpdatedAt)) : (payload.scanUpdatedAt ? ptShortDate.format(new Date(payload.scanUpdatedAt)) : "sem leitura");
-    tierButtons.forEach((button) => {
-      const tier = button.dataset.tier || "all";
-      button.textContent = tier === "all" ? "Todos" : `T${tier} · ${payload.tierCounts?.[tier] ?? 0}`;
-    });
-  }
-
-  function renderStatsBombSource(payload) {
-    const source = payload.statsbomb || {};
-    const aggregated = Number(source.matchesAggregated) || 0;
-    const discovered = Number(source.matchesDiscovered) || 0;
-    const profiles = Number(source.teamProfiles) || 0;
-    const coverage = aggregated
-      ? `${aggregated} partidas agregadas · ${profiles} perfis de equipe. O sinal só entra quando os dois times têm cobertura histórica suficiente.`
-      : "Catálogo histórico em sincronização. Até existir cobertura dos dois times, este sinal não altera a probabilidade.";
-    statsbombStatus.textContent = `${source.mode || "histórico seletivo"} · ${aggregated}/${discovered || "—"} partidas processadas. ${coverage}`;
-    statsbombSource.classList.toggle("ready", aggregated > 0);
-  }
-
-  function renderFootballDataSource(payload) {
-    const source = payload.footballData || {};
-    const verified = Number(source.verifiedAnalyses) || 0;
-    const partial = Number(source.partialAnalyses) || 0;
-    const coverage = verified
-      ? `${verified} análise(s) com tabela e forma confirmadas; ${partial} parcial(is).`
-      : "A fonte será aplicada apenas a competições mapeadas e cobertas pelo plano; nenhuma chave ou resposta bruta é exposta aqui.";
-    footballDataStatus.textContent = `${source.mode || "tabela e forma por competição"} · ${coverage}`;
-    footballDataSource.classList.toggle("ready", verified > 0);
-  }
-
-  function renderPublication(payload) {
-    const publication = payload.publication || {};
-    const schedule = payload.schedule || {};
-    const date = publication.targetDate ? new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit" }).format(new Date(`${publication.targetDate}T12:00:00-03:00`)) : null;
-    const published = Number(publication.analysesPublished) || 0;
-    const detected = Number(publication.fixturesDetected) || 0;
-    if (publication.status === "completed") {
-      publicationCopy.textContent = `${date ? `Dia-alvo ${date}: ` : ""}${published}/${detected} jogos prioritários receberam Tier. A publicação ocorre às ${schedule.nextDayScan || "23:30"} BRT; a conferência de resultado roda às ${(schedule.resultChecks || []).join(", ")} BRT.`;
-    } else if (publication.status === "running") {
-      publicationCopy.textContent = `${date ? `Dia-alvo ${date}: ` : ""}varredura em andamento. O feed só trata a análise como publicada quando a rotina termina.`;
-    } else if (publication.status === "failed") {
-      publicationCopy.textContent = "A última varredura não foi concluída. Nenhum resultado será atribuído a uma análise inexistente; verifique a próxima execução programada.";
-    } else {
-      publicationCopy.textContent = `A próxima varredura cria o mapa do dia seguinte às ${schedule.nextDayScan || "23:30"} BRT. Jogos prioritários recebem Tier 1–4, inclusive quando não atingem a meta.`;
-    }
-  }
-
-  function renderResults(payload) {
-    results.replaceChildren();
-    const resultData = payload.results || {};
-    const green = Number(resultData.greenCount) || 0;
-    const red = Number(resultData.redCount) || 0;
-    const pending = Number(resultData.pendingCount) || 0;
-    resultsMeta.textContent = `${green} green · ${red} red · ${pending} aguardando. Mercado 1X2: somente 90 minutos e acréscimos.`;
-    const history = Array.isArray(resultData.history) ? resultData.history : [];
-    if (!history.length) {
-      results.append(emptyState("Ainda não há publicação liquidada.", "Quando um jogo publicado terminar, a rotina registrará Green, Red ou Anulado sem reescrever a análise original.", false));
-      return;
-    }
-    const table = element("div", "result-table");
-    const header = element("div", "result-row result-head");
-    ["Campeonato", "Jogo", "Publicação", "Tier", "Resultado 90'", "Liquidação"].forEach((label) => header.append(element("span", "", label)));
+  function renderResults() {
+    dom.results.replaceChildren();
+    const data = state.payload?.results || {};
+    dom.resultsMeta.textContent = `${Number(data.greenCount) || 0} Green · ${Number(data.redCount) || 0} Red · ${Number(data.pendingCount) || 0} aguardando`;
+    const history = Array.isArray(data.history) ? data.history : [];
+    if (!history.length) return dom.results.append(emptyState("Sem liquidações automáticas", "O histórico do modelo aparecerá quando sugestões publicadas terminarem."));
+    const table = element("div", "data-table");
+    const header = element("div", "table-row header");
+    ["Campeonato", "Jogo", "Sugestão", "Tier", "Resultado"].forEach((label) => header.append(element("span", "", label)));
     table.append(header);
-    history.forEach((item) => {
-      const row = element("div", "result-row");
-      const competition = element("div");
-      competition.append(element("strong", "", item.league || "Competição"), element("small", "", item.country || "Internacional"));
-      const match = element("div");
-      match.append(element("strong", "", `${item.homeName || "Mandante"} × ${item.awayName || "Visitante"}`), element("small", "", item.kickoff ? ptShortDate.format(new Date(item.kickoff)) : ""));
-      const publication = element("div");
-      publication.append(element("strong", "", item.favoriteName || "—"), element("small", "", `${item.market || "1X2"} · ${formatNumber(item.probability)}%`));
-      const tier = element("span", `tier-badge tier-${item.tier || 4}`, `Tier ${item.tier || "—"}`);
-      const score = element("div");
-      score.append(element("strong", "", Number.isFinite(Number(item.homeScore90)) && Number.isFinite(Number(item.awayScore90)) ? `${item.homeScore90} × ${item.awayScore90}` : "—"), element("small", "", "90 min. + acréscimos"));
-      const status = String(item.settlement || "void");
-      const statusLabel = { green: "GREEN", red: "RED", void: "ANULADO" }[status] || "ANULADO";
-      const outcome = element("div", `result-outcome ${status}`, statusLabel);
-      outcome.append(element("small", "", item.note || ""));
-      row.append(competition, match, publication, tier, score, outcome);
-      table.append(row);
+    history.slice(0, 30).forEach((item) => {
+      const row = element("div", "table-row");
+      const league = element("div"); league.append(element("strong", "", item.league || "Competição"), element("small", "", item.country || ""));
+      const match = element("div"); match.append(element("strong", "", `${item.homeName || "Mandante"} × ${item.awayName || "Visitante"}`), element("small", "", item.kickoff ? ptDate.format(new Date(item.kickoff)) : ""));
+      const pick = element("div"); pick.append(element("strong", "", item.favoriteName || "—"), element("small", "", `${number(item.probability)}%`));
+      const tier = element("span", "tier-tag", `T${item.tier || "—"}`);
+      const outcome = String(item.settlement || "pending");
+      const label = outcome === "green" ? "Green" : outcome === "red" ? "Red" : outcome === "void" ? "Anulado" : "Pendente";
+      row.append(league, match, pick, tier, element("span", `status-label ${outcome === "green" || outcome === "red" ? outcome : ""}`, label)); table.append(row);
     });
-    results.append(table);
+    dom.results.append(table);
   }
 
-  const ownerHeaders = () => ({
-    apikey: config.publishableKey,
-    Authorization: `Bearer ${ownerToken}`,
-    "Content-Type": "application/json",
-  });
-
-  async function ownerRpc(name, body = {}) {
-    const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
-      method: "POST", headers: ownerHeaders(), body: JSON.stringify(body), credentials: "omit",
+  function syncLeagues() {
+    const items = [...(state.payload?.candidates || []), ...(state.payload?.screenedFixtures || [])];
+    const unique = new Map(); items.forEach((item) => unique.set(leagueKey(item), leagueLabel(item)));
+    [dom.league, dom.screeningLeague].forEach((select) => {
+      const current = select === dom.league ? state.league : state.screeningLeague;
+      select.replaceChildren(); const all = element("option", "", "Todos os campeonatos"); all.value = "all"; select.append(all);
+      [...unique.entries()].sort((a, b) => a[1].localeCompare(b[1], "pt-BR")).forEach(([key, label]) => { const option = element("option", "", label); option.value = key; select.append(option); });
+      select.value = unique.has(current) ? current : "all";
     });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(payload?.message || `Acesso indisponível (${response.status})`);
+  }
+
+  function setSummary() {
+    const payload = state.payload || {};
+    $("#screened-count").textContent = String(payload.screenedCount ?? 0);
+    $("#analyzed-count").textContent = String(payload.analyzedCount ?? 0);
+    $("#verified-count").textContent = String(payload.verifiedCount ?? 0);
+    $("#qualified-count").textContent = String(payload.qualifiedCount ?? 0);
+    dom.updated.textContent = payload.sourceUpdatedAt ? `Atualizado ${ptDate.format(new Date(payload.sourceUpdatedAt))}` : payload.scanUpdatedAt ? `Varredura ${ptDate.format(new Date(payload.scanUpdatedAt))}` : "sem leitura recente";
+    $$('[data-tier]').forEach((button) => { const key = button.dataset.tier; button.textContent = key === "all" ? "Todos" : `Tier ${key} · ${payload.tierCounts?.[key] ?? 0}`; });
+  }
+
+  async function loadPublic() {
+    if (!config?.supabaseUrl || !config?.publishableKey) return dom.dashboard.replaceChildren(emptyState("Configuração ausente", "O contrato público do Supabase não foi encontrado."));
+    dom.refresh.disabled = true; dom.refresh.textContent = "Atualizando…";
+    try {
+      const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/get_public_tipster_dashboard`, { method: "POST", cache: "no-store", credentials: "omit", headers: { apikey: config.publishableKey, Authorization: `Bearer ${config.publishableKey}`, "Content-Type": "application/json" }, body: "{}" });
+      if (!response.ok) throw new Error(`Feed indisponível (${response.status})`);
+      const payload = await response.json();
+      if (!payload || payload.schemaVersion !== 10 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures)) throw new Error("Contrato público incompatível.");
+      state.payload = payload; syncLeagues(); setSummary(); renderCandidates(); renderScreening(); renderResults();
+    } catch (error) {
+      console.warn("APITOLHEIRO public feed", error instanceof Error ? error.message : "unknown");
+      dom.dashboard.replaceChildren(emptyState("Não foi possível carregar o radar", "Tente novamente em alguns instantes."));
+    } finally { dom.refresh.disabled = false; dom.refresh.textContent = "Atualizar"; }
+  }
+
+  const viewMeta = {
+    radar: ["ANÁLISE", "Radar do dia"], screening: ["ANÁLISE", "Jogos filtrados"], bets: ["GESTÃO", "Minhas apostas"],
+    bankroll: ["GESTÃO", "Banca"], ai: ["CONFIGURAÇÃO", "API IA"], method: ["SISTEMA", "Regras e fontes"],
+  };
+  function showView(name) {
+    $$(".view").forEach((view) => view.classList.toggle("active", view.dataset.view === name));
+    $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.viewTarget === name));
+    dom.viewEyebrow.textContent = viewMeta[name]?.[0] || "APITOLHEIRO"; dom.viewTitle.textContent = viewMeta[name]?.[1] || "Painel";
+    if (["bets", "bankroll", "ai"].includes(name) && !state.ownerPassword) openOwnerDialog();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function ownerCall(action, fields = {}, password = state.ownerPassword) {
+    const response = await fetch(`${config.supabaseUrl}/functions/v1/owner-control`, {
+      method: "POST", credentials: "omit", cache: "no-store",
+      headers: { apikey: config.publishableKey, Authorization: `Bearer ${password}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...fields }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) { const error = new Error(payload.error || `Operação indisponível (${response.status})`); error.status = response.status; throw error; }
     return payload;
   }
 
-  function updateModelForProvider() {
-    const defaults = { openai: "gpt-4.1-mini", deepseek: "deepseek-chat", google: "gemini-2.0-flash" };
-    aiModel.value = defaults[aiProvider.value] || "";
+  function setPrivateVisibility(unlocked) {
+    ["bets", "bankroll"].forEach((name) => { $(`#${name}-private-gate`).hidden = unlocked; $(`#${name}-private-content`).hidden = !unlocked; });
+    $("#ai-private-gate").hidden = unlocked; dom.aiForm.hidden = !unlocked;
+    dom.ownerDot.classList.toggle("connected", unlocked);
+    dom.ownerLabel.textContent = unlocked ? "Área privada desbloqueada" : "Área privada bloqueada";
+    dom.ownerCopy.textContent = unlocked ? "Sessão protegida ativa" : "Banca e chaves protegidas";
+    dom.ownerAccess.textContent = unlocked ? "Bloquear" : "Desbloquear";
+    if (!unlocked) dom.openBadge.textContent = "0";
   }
 
-  function clearOwnerSession(message = "Sessão do proprietário encerrada.") {
-    ownerToken = "";
-    sessionStorage.removeItem("apitoleiro_owner_access_token");
-    ownerAuthPanel.hidden = false;
-    aiForm.hidden = true;
-    ownerAuthMessage.textContent = message;
+  function lockOwner(message = "Sessão privada encerrada.") {
+    state.ownerPassword = ""; state.ownerData = null; sessionStorage.removeItem("apitoleiro_owner_password");
+    setPrivateVisibility(false); dom.ownerMessage.textContent = message;
   }
 
-  async function renderOwnerSettings() {
-    if (!ownerToken) return;
+  function openOwnerDialog() { dom.ownerMessage.textContent = ""; dom.ownerPassword.value = ""; dom.ownerDialog.showModal(); setTimeout(() => dom.ownerPassword.focus(), 0); }
+
+  async function loadOwnerDashboard() {
+    if (!state.ownerPassword) return;
+    try { const data = await ownerCall("dashboard"); state.ownerData = data; setPrivateVisibility(true); renderOwnerData(); }
+    catch (error) { if (error.status === 401 || error.status === 429) lockOwner(error.message); else console.warn("Owner dashboard", error.message); }
+  }
+
+  function renderOwnerData() {
+    const data = state.ownerData || {};
+    const bank = data.bankroll || {};
+    dom.openBadge.textContent = String(bank.openCount || 0);
+    $("#bet-open-count").textContent = String(bank.openCount || 0); $("#bet-open-exposure").textContent = `${currency(bank.openExposure)} comprometidos`;
+    $("#bet-green-count").textContent = String(bank.greenCount || 0); $("#bet-red-count").textContent = String(bank.redCount || 0); $("#bet-profit").textContent = currency(bank.realizedProfit);
+    $("#bankroll-balance").textContent = currency(bank.balance); $("#bankroll-result").textContent = `Resultado: ${currency(bank.realizedProfit)}`;
+    $("#bankroll-available").textContent = currency(bank.available); $("#bankroll-initial").textContent = currency(bank.initial); $("#bankroll-exposure").textContent = currency(bank.openExposure);
+    $("#bankroll-roi").textContent = `${percent.format(Number(bank.roi) || 0)}%`; $("#bankroll-record").textContent = `${bank.greenCount || 0}G · ${bank.redCount || 0}R`; $("#bankroll-input").value = String(Number(bank.initial) || 0);
+    renderBets(data.bets || []); renderAiSettings(data.ai || {});
+  }
+
+  function renderBets(bets) {
+    dom.betsList.replaceChildren();
+    if (!bets.length) return dom.betsList.append(emptyState("Nenhuma entrada registrada", "Use “Entrada realizada” em uma sugestão qualificada para abrir sua primeira aposta."));
+    const table = element("div", "bet-list");
+    const header = element("div", "bet-row header"); ["Jogo", "Escolha", "Entrada", "Odd", "Status", "Liquidação"].forEach((label) => header.append(element("span", "", label))); table.append(header);
+    bets.forEach((bet) => {
+      const row = element("div", "bet-row");
+      const fixture = element("div"); fixture.append(element("strong", "", `${bet.home_team_name} × ${bet.away_team_name}`), element("small", "", `${bet.league_name} · ${ptDate.format(new Date(bet.kickoff_at))}`));
+      const pick = element("div"); pick.append(element("strong", "", bet.chosen_team_name), element("small", "", bet.chosen_side === bet.suggested_side ? "lado sugerido" : "lado oposto"));
+      const stake = element("strong", "", currency(bet.stake)); const odds = element("strong", "", number(bet.offered_odds, 3));
+      const label = bet.status === "green" ? "Green" : bet.status === "red" ? "Red" : "Aberta";
+      const status = element("span", `status-label ${bet.status === "green" || bet.status === "red" ? bet.status : ""}`, label);
+      const actions = element("div", "settle-actions");
+      const green = element("button", "green", "Green"); green.type = "button"; green.addEventListener("click", () => settleOwnerBet(bet.id, "green"));
+      const red = element("button", "red", "Red"); red.type = "button"; red.addEventListener("click", () => settleOwnerBet(bet.id, "red")); actions.append(green, red);
+      row.append(fixture, pick, stake, odds, status, actions); table.append(row);
+    });
+    dom.betsList.append(table);
+  }
+
+  async function settleOwnerBet(betId, outcome) {
+    if (!window.confirm(`Confirmar ${outcome === "green" ? "Green" : "Red"} para esta entrada?`)) return;
+    try { state.ownerData = await ownerCall("settle_bet", { betId, outcome }); renderOwnerData(); }
+    catch (error) { window.alert(error.message); }
+  }
+
+  function renderAiSettings(ai) {
+    if (ai.provider) dom.aiProvider.value = ai.provider;
+    if (ai.model) dom.aiModel.value = ai.model;
+    dom.aiEnabled.checked = ai.enabled !== false; dom.aiMax.value = String(ai.maxReviewsPerRun ?? 10);
+    dom.aiConnection.textContent = ai.configured ? `${String(ai.provider).toUpperCase()} conectado · ${ai.model || "modelo configurado"}` : "Nenhuma IA configurada.";
+    dom.aiStatus.textContent = ai.configured ? "Chave criptografada. Cole uma nova chave somente para substituir a conexão." : "A chave será testada antes de ser criptografada.";
+  }
+
+  function openBet(candidate) {
+    if (!state.ownerPassword) { state.pendingCandidate = candidate; openOwnerDialog(); return; }
+    state.selectedCandidate = candidate;
+    $("#bet-league").textContent = leagueLabel(candidate); $("#bet-fixture").textContent = `${candidate.home?.name || "Mandante"} × ${candidate.away?.name || "Visitante"}`;
+    $("#bet-home-label").textContent = candidate.home?.name || "Mandante"; $("#bet-away-label").textContent = candidate.away?.name || "Visitante";
+    const selected = dom.betForm.querySelector(`input[name='chosen-side'][value='${candidate.favorite || "home"}']`); if (selected) selected.checked = true;
+    $("#bet-stake").value = ""; $("#bet-odds").value = ""; dom.betMessage.textContent = ""; dom.betDialog.showModal();
+  }
+
+  const modelDefaults = { deepseek: "deepseek-chat", openai: "gpt-4.1-mini", google: "gemini-2.0-flash", grok: "grok-3-mini" };
+
+  $$(".nav-item").forEach((button) => button.addEventListener("click", () => showView(button.dataset.viewTarget)));
+  $$("[data-tier]").forEach((button) => button.addEventListener("click", () => { state.tier = button.dataset.tier || "all"; $$('[data-tier]').forEach((item) => item.classList.toggle("selected", item === button)); renderCandidates(); }));
+  dom.league.addEventListener("change", () => { state.league = dom.league.value || "all"; renderCandidates(); });
+  dom.screeningLeague.addEventListener("change", () => { state.screeningLeague = dom.screeningLeague.value || "all"; renderScreening(); });
+  dom.refresh.addEventListener("click", () => void loadPublic());
+  $$(".unlock-action").forEach((button) => button.addEventListener("click", openOwnerDialog));
+  dom.ownerAccess.addEventListener("click", () => state.ownerPassword ? lockOwner() : openOwnerDialog());
+  $("#owner-close").addEventListener("click", () => dom.ownerDialog.close()); $("#owner-cancel").addEventListener("click", () => dom.ownerDialog.close());
+  $("#bet-close").addEventListener("click", () => dom.betDialog.close()); $("#bet-cancel").addEventListener("click", () => dom.betDialog.close());
+
+  dom.ownerForm.addEventListener("submit", async (event) => {
+    event.preventDefault(); const password = dom.ownerPassword.value; const submit = dom.ownerForm.querySelector("button[type='submit']"); submit.disabled = true; dom.ownerMessage.textContent = "Validando…";
     try {
-      const settings = await ownerRpc("get_ai_provider_settings");
-      if (!settings?.isAdmin) {
-        clearOwnerSession("Este e-mail não possui permissão de proprietário.");
-        return;
-      }
-      ownerAuthPanel.hidden = true;
-      aiForm.hidden = false;
-      if (settings.provider) aiProvider.value = settings.provider;
-      if (settings.model) aiModel.value = settings.model;
-      aiEnabled.checked = settings.enabled === true;
-      aiMaxReviews.value = String(settings.maxReviewsPerRun ?? 0);
-      aiSettingsStatus.textContent = settings.encryptionReady
-        ? (settings.configured ? `Chave configurada em ${settings.configuredAt ? ptShortDate.format(new Date(settings.configuredAt)) : "data não informada"}. Informe outra chave apenas para substituir a atual.` : "Nenhuma chave configurada. A análise estatística continua independente.")
-        : "Falta preparar a chave mestra de criptografia no Vault; a chave de provedor não será aceita antes disso.";
-      aiApiKey.required = !settings.configured;
-    } catch (error) {
-      clearOwnerSession(error instanceof Error ? error.message : "Não foi possível validar a sessão.");
-    }
-  }
+      await ownerCall("authenticate", {}, password); state.ownerPassword = password; sessionStorage.setItem("apitoleiro_owner_password", password); dom.ownerPassword.value = ""; dom.ownerDialog.close(); setPrivateVisibility(true); await loadOwnerDashboard();
+      if (state.pendingCandidate) { const candidate = state.pendingCandidate; state.pendingCandidate = null; openBet(candidate); }
+    } catch (error) { dom.ownerMessage.textContent = error.message; dom.ownerMessage.className = "form-message error"; }
+    finally { submit.disabled = false; }
+  });
 
-  async function importOwnerSessionFromUrl() {
-    const fragment = new URLSearchParams(window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "");
-    const accessToken = fragment.get("access_token");
-    if (accessToken) {
-      ownerToken = accessToken;
-      sessionStorage.setItem("apitoleiro_owner_access_token", ownerToken);
-      history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
-    }
-    if (ownerToken) await renderOwnerSettings();
-  }
+  dom.betForm.addEventListener("submit", async (event) => {
+    event.preventDefault(); if (!state.selectedCandidate) return;
+    const chosen = dom.betForm.querySelector("input[name='chosen-side']:checked")?.value; const submit = dom.betForm.querySelector("button[type='submit']"); submit.disabled = true; dom.betMessage.textContent = "Registrando…";
+    try {
+      state.ownerData = await ownerCall("create_bet", { fixtureId: state.selectedCandidate.fixtureId, chosenSide: chosen, stake: Number($("#bet-stake").value), offeredOdds: Number($("#bet-odds").value) });
+      renderOwnerData(); dom.betDialog.close(); showView("bets");
+    } catch (error) { dom.betMessage.textContent = error.message; dom.betMessage.className = "form-message error"; }
+    finally { submit.disabled = false; }
+  });
 
-  async function load() {
-    if (!config?.supabaseUrl || !config?.publishableKey) {
-      dashboard.replaceChildren(emptyState("Configuração pública ausente.", "A página não encontrou o contrato do Supabase.", true));
-      return;
-    }
-    refreshButton.disabled = true;
-    refreshButton.textContent = "Atualizando…";
-    try {
-      const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/get_public_tipster_dashboard`, {
-        method: "POST",
-        cache: "no-store",
-        credentials: "omit",
-        headers: {
-          apikey: config.publishableKey,
-          Authorization: `Bearer ${config.publishableKey}`,
-          "Content-Type": "application/json",
-        },
-        body: "{}",
-      });
-      if (!response.ok) throw new Error(`Feed indisponível (${response.status})`);
-      const payload = await response.json();
-      if (!payload || payload.schemaVersion !== 9 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures) || !payload.statsbomb || !payload.footballData || !payload.results) throw new Error("Formato de feed inválido");
-      state.payload = payload;
-      setSummary(payload);
-      renderStatsBombSource(payload);
-      renderFootballDataSource(payload);
-      renderPublication(payload);
-      renderResults(payload);
-      syncLeagueOptions(payload);
-      render();
-    } catch (error) {
-      dashboard.replaceChildren(emptyState("Não foi possível carregar o radar.", "A leitura pública será tentada novamente quando você clicar em atualizar.", true));
-      screening.replaceChildren();
-      results.replaceChildren();
-      console.warn("APITOLHEIRO public dashboard", error instanceof Error ? error.message : "unknown error");
-    } finally {
-      refreshButton.disabled = false;
-      refreshButton.textContent = "Atualizar leitura";
-    }
-  }
+  dom.bankrollForm.addEventListener("submit", async (event) => {
+    event.preventDefault(); const submit = dom.bankrollForm.querySelector("button[type='submit']"); submit.disabled = true; dom.bankrollMessage.textContent = "Salvando…";
+    try { state.ownerData = await ownerCall("set_bankroll", { initialAmount: Number($("#bankroll-input").value) }); renderOwnerData(); dom.bankrollMessage.textContent = "Banca atualizada."; dom.bankrollMessage.className = "form-message success"; }
+    catch (error) { dom.bankrollMessage.textContent = error.message; dom.bankrollMessage.className = "form-message error"; }
+    finally { submit.disabled = false; }
+  });
 
-  tierButtons.forEach((button) => button.addEventListener("click", () => {
-    state.tier = button.dataset.tier || "all";
-    tierButtons.forEach((item) => item.classList.toggle("selected", item === button));
-    render();
-  }));
-  leagueFilter.addEventListener("change", () => {
-    state.league = leagueFilter.value || "all";
-    render();
-  });
-  ownerAccess.addEventListener("click", () => {
-    ownerDialog.showModal();
-    void renderOwnerSettings();
-  });
-  ownerClose.addEventListener("click", () => ownerDialog.close());
-  ownerDialog.addEventListener("click", (event) => {
-    if (event.target === ownerDialog) ownerDialog.close();
-  });
-  ownerLink.addEventListener("click", async () => {
-    const email = ownerEmail.value.trim().toLowerCase();
-    if (!email || !email.includes("@")) {
-      ownerAuthMessage.textContent = "Informe um e-mail válido para receber o link.";
-      return;
-    }
-    ownerLink.disabled = true;
-    ownerLink.textContent = "Enviando…";
+  dom.aiProvider.addEventListener("change", () => { dom.aiModel.value = modelDefaults[dom.aiProvider.value] || ""; });
+  dom.aiForm.addEventListener("submit", async (event) => {
+    event.preventDefault(); const submit = dom.aiForm.querySelector("button[type='submit']"); submit.disabled = true; dom.aiStatus.textContent = "Testando a chave diretamente no provedor…"; dom.aiStatus.className = "form-message";
     try {
-      const response = await fetch(`${config.supabaseUrl}/auth/v1/otp`, {
-        method: "POST",
-        credentials: "omit",
-        headers: { apikey: config.publishableKey, Authorization: `Bearer ${config.publishableKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ email, create_user: true, redirect_to: `${window.location.origin}${window.location.pathname}` }),
-      });
-      if (!response.ok) throw new Error("Não foi possível enviar o link de acesso.");
-      ownerAuthMessage.textContent = "Link enviado. Abra-o neste mesmo navegador para liberar a área privada.";
-    } catch (error) {
-      ownerAuthMessage.textContent = error instanceof Error ? error.message : "Falha ao solicitar o link.";
-    } finally {
-      ownerLink.disabled = false;
-      ownerLink.textContent = "Enviar link de acesso";
-    }
+      const response = await ownerCall("save_ai", { provider: dom.aiProvider.value, apiKey: dom.aiKey.value, model: dom.aiModel.value.trim(), enabled: dom.aiEnabled.checked, maxReviewsPerRun: Number(dom.aiMax.value) });
+      dom.aiKey.value = ""; dom.aiStatus.textContent = response.message || "Conexão concluída."; dom.aiStatus.className = "form-message success"; await loadOwnerDashboard();
+    } catch (error) { dom.aiStatus.textContent = error.message; dom.aiStatus.className = "form-message error"; }
+    finally { submit.disabled = false; }
   });
-  aiProvider.addEventListener("change", updateModelForProvider);
-  aiForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const apiKey = aiApiKey.value;
-    if (!apiKey || apiKey.length < 12) {
-      aiSettingsStatus.textContent = "Informe uma chave válida para salvar ou substituir a configuração.";
-      return;
-    }
-    if (!window.confirm("Confirmar o envio desta chave ao cofre criptografado do Supabase? Ela não poderá ser visualizada depois.")) return;
-    const submit = aiForm.querySelector("button[type='submit']");
-    submit.disabled = true;
-    try {
-      const settings = await ownerRpc("save_ai_provider_credential", {
-        p_provider: aiProvider.value,
-        p_api_key: apiKey,
-        p_model: aiModel.value.trim(),
-        p_enabled: aiEnabled.checked,
-        p_max_reviews_per_run: Number(aiMaxReviews.value),
-      });
-      aiApiKey.value = "";
-      aiSettingsStatus.textContent = settings.enabled
-        ? `Configuração salva. Até ${settings.maxReviewsPerRun} revisão(ões) de IA poderão rodar por publicação.`
-        : "Configuração salva com revisão automática desligada.";
-    } catch (error) {
-      aiSettingsStatus.textContent = error instanceof Error ? error.message : "Não foi possível salvar a configuração.";
-    } finally {
-      submit.disabled = false;
-    }
-  });
-  ownerSignout.addEventListener("click", () => clearOwnerSession());
-  refreshButton.addEventListener("click", () => void load());
-  void importOwnerSessionFromUrl();
-  void load();
+
+  dom.ownerDialog.addEventListener("click", (event) => { if (event.target === dom.ownerDialog) dom.ownerDialog.close(); });
+  dom.betDialog.addEventListener("click", (event) => { if (event.target === dom.betDialog) dom.betDialog.close(); });
+
+  setPrivateVisibility(Boolean(state.ownerPassword));
+  void loadPublic();
+  if (state.ownerPassword) void loadOwnerDashboard();
 })();

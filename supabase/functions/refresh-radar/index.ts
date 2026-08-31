@@ -96,7 +96,7 @@ type Insight = {
   caveats: string[];
 };
 type AiWorkerCredential = {
-  provider: "openai" | "deepseek" | "google";
+  provider: "openai" | "deepseek" | "google" | "grok";
   api_key: string;
   model: string;
   enabled: boolean;
@@ -105,12 +105,12 @@ type AiWorkerCredential = {
 type AiReview = { summary: string; riskFlags: string[]; scoreDelta: number };
 
 const API_BASE_URL = "https://v3.football.api-sports.io";
-const DAILY_LIMIT = 90;
+const DAILY_LIMIT = 78;
 // The free API-Football plan has 100 daily calls. A scan intentionally leaves
 // a safety margin for the result checker and provider retries; cached reads do
 // not consume this budget. Every fixture still receives a transparent baseline
 // Tier even if an optional prediction is unavailable near the cap.
-const MAX_REQUESTS_PER_RUN = 82;
+const MAX_REQUESTS_PER_RUN = 70;
 const PRIORITY_LEAGUES = new Set([2, 3, 39, 61, 71, 72, 73, 78, 88, 94, 128, 135, 140, 253]);
 const PROVIDER = "api-football";
 const FOOTBALL_DATA_PROVIDER = "football-data";
@@ -450,7 +450,7 @@ const footballDataContext = async (client: FootballDataClient, apiKey: string | 
     status: "sem cobertura", label: "Competição sem mapeamento seguro na fonte oficial", competitionCode: null,
     homePosition: null, awayPosition: null, homeRecent: null, awayRecent: null, score: null, updatedAt: null,
   };
-  const standings = await client.optional<FootballDataStandingsResponse>(`competitions/${competitionCode}/standings`, 90, apiKey);
+  const standings = await client.optional<FootballDataStandingsResponse>(`competitions/${competitionCode}/standings`, 1440, apiKey);
   if (!standings) return {
     status: "indisponível", label: "Cobertura não disponível no plano ou na janela de consulta", competitionCode,
     homePosition: null, awayPosition: null, homeRecent: null, awayRecent: null, score: null, updatedAt: null,
@@ -461,13 +461,13 @@ const footballDataContext = async (client: FootballDataClient, apiKey: string | 
   // The v4 endpoint responds with `{ matches: [...] }`; unwrapping it here is
   // essential. Treating the whole response as an array silently erased recent
   // form, which in turn made every mandatory last-10 / home-last-5 check fail.
-  const matchesResponse = await client.optional<FootballDataMatchesResponse>(`competitions/${competitionCode}/matches?status=FINISHED&limit=100`, 180, apiKey);
+  const matchesResponse = await client.optional<FootballDataMatchesResponse>(`competitions/${competitionCode}/matches?status=FINISHED&limit=100`, 1440, apiKey);
   // Early league rounds do not provide ten finished matches per club in the
   // current season. The official API supports `season`, so merge the completed
   // prior campaign before measuring the real latest ten and five home matches.
   const priorSeason = fixture.league.season > 1900 ? fixture.league.season - 1 : null;
   const priorMatchesResponse = priorSeason
-    ? await client.optional<FootballDataMatchesResponse>(`competitions/${competitionCode}/matches?season=${priorSeason}&status=FINISHED&limit=500`, 720, apiKey)
+    ? await client.optional<FootballDataMatchesResponse>(`competitions/${competitionCode}/matches?season=${priorSeason}&status=FINISHED&limit=500`, 1440, apiKey)
     : null;
   const matches = [...(matchesResponse?.matches || []), ...(priorMatchesResponse?.matches || [])];
   const homeRecent = footballDataRecent(matches, fixture.teams.home.name, true);
@@ -595,7 +595,11 @@ const reviewWithAi = async (credential: AiWorkerCredential, fixture: ProviderFix
     const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     return parseAiJson(payload.candidates?.[0]?.content?.parts?.[0]?.text || "");
   }
-  const endpoint = credential.provider === "deepseek" ? "https://api.deepseek.com/chat/completions" : "https://api.openai.com/v1/chat/completions";
+  const endpoint = credential.provider === "deepseek"
+    ? "https://api.deepseek.com/chat/completions"
+    : credential.provider === "grok"
+      ? "https://api.x.ai/v1/chat/completions"
+      : "https://api.openai.com/v1/chat/completions";
   response = await fetch(endpoint, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${credential.api_key}` },
@@ -836,17 +840,17 @@ const persistInsight = async (fixture: ProviderFixture, insight: Insight, target
   return savedFixture;
 };
 
-const runNextDayAnalysis = async (apiKey: string, footballDataApiKey: string | null) => {
-  const targetDate = brtDate(1);
+const runAnalysis = async (apiKey: string, footballDataApiKey: string | null, targetOffsetDays: 0 | 1, runKind: "current_day_scan" | "next_day_scan") => {
+  const targetDate = brtDate(targetOffsetDays);
   const run = await databaseRequest<{ id: string }[]>("ingestion_runs", {
     method: "POST", headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ provider: PROVIDER, run_type: "next_day_analysis", started_at: utcNow(), status: "running" }),
+    body: JSON.stringify({ provider: PROVIDER, run_type: runKind, started_at: utcNow(), status: "running" }),
   });
   const runId = run[0]?.id;
   if (!runId) throw new Error("Could not start the ingestion audit record.");
   const publication = await databaseRequest<{ id: string }[]>("analysis_runs", {
     method: "POST", headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ target_date: targetDate, run_kind: "next_day_scan", started_at: utcNow(), status: "running" }),
+    body: JSON.stringify({ target_date: targetDate, run_kind: runKind, started_at: utcNow(), status: "running" }),
   });
   const publicationId = publication[0]?.id;
   if (!publicationId) throw new Error("Could not start the publication audit record.");
@@ -873,21 +877,21 @@ const runNextDayAnalysis = async (apiKey: string, footballDataApiKey: string | n
     const representativeFixtures = new Map<string, ProviderFixture>();
     scheduled.forEach((fixture) => representativeFixtures.set(`${fixture.league.id}:${fixture.league.season}`, fixture));
     for (const [key, fixture] of representativeFixtures) {
-      const standings = await client.optional<StandingsResponse[]>("standings", { league: fixture.league.id, season: fixture.league.season }, 180, apiKey);
+      const standings = await client.optional<StandingsResponse[]>("standings", { league: fixture.league.id, season: fixture.league.season }, 1440, apiKey);
       // A current-season feed is not enough in August/early league rounds: it
       // can contain fewer than ten completed fixtures. Combine it with the
       // prior season once per league, then select the real latest-ten/latest-five
       // records across the season boundary.
-      const currentSeasonFixtures = await client.optional<ProviderFixture[]>("fixtures", { league: fixture.league.id, season: fixture.league.season }, 360, apiKey);
+      const currentSeasonFixtures = await client.optional<ProviderFixture[]>("fixtures", { league: fixture.league.id, season: fixture.league.season }, 1440, apiKey);
       const priorSeasonFixtures = fixture.league.season > 1900
-        ? await client.optional<ProviderFixture[]>("fixtures", { league: fixture.league.id, season: fixture.league.season - 1 }, 720, apiKey)
+        ? await client.optional<ProviderFixture[]>("fixtures", { league: fixture.league.id, season: fixture.league.season - 1 }, 1440, apiKey)
         : null;
       const seasonFixtures = currentSeasonFixtures || priorSeasonFixtures
         ? [...(currentSeasonFixtures || []), ...(priorSeasonFixtures || [])]
         : null;
       // Pre-match lineups cannot be factual the evening before. Injuries can
       // be acquired in one league/date request and are kept separate by fixture.
-      const leagueInjuries = await client.optional<Injury[]>("injuries", { league: fixture.league.id, season: fixture.league.season, date: targetDate, timezone: "America/Sao_Paulo" }, 180, apiKey);
+      const leagueInjuries = await client.optional<Injury[]>("injuries", { league: fixture.league.id, season: fixture.league.season, date: targetDate, timezone: "America/Sao_Paulo" }, 720, apiKey);
       const injuriesByFixture = new Map<number, Injury[]>();
       (leagueInjuries || []).forEach((injury) => {
         const fixtureId = injury.fixture?.id;
@@ -907,7 +911,7 @@ const runNextDayAnalysis = async (apiKey: string, footballDataApiKey: string | n
     const insights: Insight[] = [];
     for (const fixture of scheduled) {
       const context = leagueContexts.get(`${fixture.league.id}:${fixture.league.season}`) || { positions: new Map<number, number>(), seasonFixtures: null, injuriesByFixture: new Map<number, Injury[]>() };
-      const prediction = await client.optional<Prediction[]>("predictions", { fixture: fixture.fixture.id }, 60, apiKey);
+      const prediction = await client.optional<Prediction[]>("predictions", { fixture: fixture.fixture.id }, 1440, apiKey);
       const footballData = await footballDataContext(officialData, footballDataApiKey, fixture);
       let insight = buildInsight(
         fixture,
@@ -923,7 +927,7 @@ const runNextDayAnalysis = async (apiKey: string, footballDataApiKey: string | n
       );
       let review: AiReview | null = null;
       let reviewLatency: number | null = null;
-      if (aiCredential && aiReviewAttempts < aiCredential.max_reviews_per_run) {
+      if (aiCredential && insight.eligible && aiReviewAttempts < aiCredential.max_reviews_per_run) {
         const started = Date.now();
         aiReviewAttempts += 1;
         try {
@@ -981,11 +985,14 @@ Deno.serve(async (request) => {
     if (!received) return Response.json({ error: "Unauthorized." }, { status: 401 });
     const refreshSecret = await rpc<string | null>("get_cron_refresh_secret");
     if (!refreshSecret || !constantTimeEquals(received, refreshSecret)) return Response.json({ error: "Unauthorized." }, { status: 401 });
+    const body = await request.json().catch(() => ({})) as { target_offset_days?: unknown; mode?: unknown };
+    const targetOffsetDays: 0 | 1 = Number(body.target_offset_days) === 0 ? 0 : 1;
+    const runKind: "current_day_scan" | "next_day_scan" = targetOffsetDays === 0 ? "current_day_scan" : "next_day_scan";
     const apiKey = await rpc<string | null>("get_api_football_key");
     if (!apiKey) return Response.json({ error: "API-Football is not configured." }, { status: 503 });
     const footballDataApiKey = await rpc<string | null>("get_football_data_key");
-    const candidates = await runNextDayAnalysis(apiKey, footballDataApiKey);
-    return Response.json({ ok: true, targetDate: brtDate(1), analyzed: candidates.length, generatedAt: utcNow() });
+    const candidates = await runAnalysis(apiKey, footballDataApiKey, targetOffsetDays, runKind);
+    return Response.json({ ok: true, mode: runKind, targetDate: brtDate(targetOffsetDays), analyzed: candidates.length, generatedAt: utcNow() });
   } catch (error) {
     console.error("APITOLHEIRO refresh failed", error instanceof Error ? error.message : "Unknown error");
     return Response.json({ error: "Analysis run failed." }, { status: 500 });

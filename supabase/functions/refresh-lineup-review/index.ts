@@ -49,10 +49,10 @@ type ReviewRow = {
 const API_BASE_URL = "https://v3.football.api-sports.io";
 const PROVIDER = "api-football";
 const FREE_DAILY_LIMIT = 100;
-const MAX_FIXTURES_PER_RUN = 4;
-const REVIEW_WINDOW_START_MINUTES = 20;
-const REVIEW_WINDOW_END_MINUTES = 100;
-const REVIEW_COOLDOWN_MINUTES = 20;
+const MAX_FIXTURES_PER_RUN = 8;
+const REVIEW_WINDOW_START_MINUTES = 0;
+const REVIEW_WINDOW_END_MINUTES = 25;
+const REVIEW_COOLDOWN_MINUTES = 5;
 
 const utcNow = () => new Date().toISOString();
 const usageDate = () => new Intl.DateTimeFormat("en-CA", {
@@ -226,17 +226,24 @@ const latestReview = async (fixtureId: string) => {
   return rows?.[0] || null;
 };
 
-const shouldReview = (review: ReviewRow | null) => {
+const shouldReview = (review: ReviewRow | null, kickoffAt: string) => {
   if (!review) return true;
   const elapsed = Date.now() - new Date(review.reviewed_at).getTime();
-  return Number.isFinite(elapsed) && elapsed >= REVIEW_COOLDOWN_MINUTES * 60_000;
+  if (!Number.isFinite(elapsed) || elapsed < REVIEW_COOLDOWN_MINUTES * 60_000) return false;
+  const finalStatuses = new Set(["confirmed", "unchanged", "downgraded", "suspended"]);
+  if (!finalStatuses.has(review.review_status)) return true;
+  const previousMinutesBeforeKickoff = (new Date(kickoffAt).getTime() - new Date(review.reviewed_at).getTime()) / 60_000;
+  const currentMinutesBeforeKickoff = (new Date(kickoffAt).getTime() - Date.now()) / 60_000;
+  // A factual XI gets one last safety check close to five minutes before the
+  // match. Once that final check happened, repeated cron polls consume no API.
+  return previousMinutesBeforeKickoff > 8 && currentMinutesBeforeKickoff <= 8;
 };
 
 const reviewFixture = async (analysis: AnalysisRow, teams: Map<string, TeamRow>, client: ApiFootballClient, apiKey: string) => {
   const fixture = fixtureOf(analysis);
   if (!fixture) return "skipped";
   const previous = await latestReview(analysis.fixture_id);
-  if (!shouldReview(previous)) return "cooldown";
+  if (!shouldReview(previous, fixture.kickoff_at)) return "cooldown";
 
   const favoriteId = analysis.favorite_side === "home" ? fixture.home_team_id : fixture.away_team_id;
   const opponentId = analysis.favorite_side === "home" ? fixture.away_team_id : fixture.home_team_id;
@@ -244,7 +251,7 @@ const reviewFixture = async (analysis: AnalysisRow, teams: Map<string, TeamRow>,
   const opponentTeam = teams.get(opponentId);
   if (!favoriteTeam || !opponentTeam) throw new Error("Fixture team reference is missing.");
 
-  const lineups = await client.optional<Lineup[]>("fixtures/lineups", { fixture: fixture.provider_fixture_id }, 4, apiKey);
+  const lineups = await client.optional<Lineup[]>("fixtures/lineups", { fixture: fixture.provider_fixture_id }, 3, apiKey);
   const favoriteLineup = (lineups || []).find((lineup) => lineup.team?.id === favoriteTeam.provider_team_id);
   const opponentLineup = (lineups || []).find((lineup) => lineup.team?.id === opponentTeam.provider_team_id);
   const starters = favoriteStarters(favoriteLineup);
@@ -273,7 +280,7 @@ const reviewFixture = async (analysis: AnalysisRow, teams: Map<string, TeamRow>,
   // Injury data is reconsulted only after an official XI exists.  This saves
   // free-plan calls while still detecting newly listed absences versus the
   // original scan.  A null response never becomes a fabricated absence.
-  const injuries = await client.optional<Injury[]>("injuries", { fixture: fixture.provider_fixture_id }, 4, apiKey);
+  const injuries = await client.optional<Injury[]>("injuries", { fixture: fixture.provider_fixture_id }, 5, apiKey);
   const favoriteInjuries = injuries === null ? null : injuries.filter((injury) => injury.team?.id === favoriteTeam.provider_team_id).length;
   const originalLineup = (analysis.metrics.lineup || {}) as { unavailableCount?: unknown; lineupReview?: { status?: unknown } };
   const originalUnavailable = typeof originalLineup.unavailableCount === "number" ? originalLineup.unavailableCount : null;

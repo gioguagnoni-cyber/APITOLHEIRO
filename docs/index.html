@@ -3,129 +3,93 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#0d121a">
-    <meta name="description" content="APITOLHEIRO — radar pré-jogo de leitura ponderada.">
+    <meta name="theme-color" content="#f4f4f2">
+    <meta name="description" content="APITOLHEIRO — análise esportiva e controle pessoal de apostas.">
     <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-    <title>APITOLHEIRO · Radar pré-jogo</title>
+    <title>APITOLHEIRO</title>
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
-    <main class="shell">
-      <header class="masthead">
-        <a class="brand" href="./" aria-label="APITOLHEIRO">
-          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span>APITOLHEIRO <b>LAB</b></span>
-        </a>
-        <div class="masthead-actions">
-          <div class="live-status"><span class="live-dot"></span>Radar público · leitura cacheada</div>
-          <button id="owner-access" class="owner-access" type="button">Área do proprietário</button>
-        </div>
-      </header>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navegação principal">
+        <a class="brand" href="./" aria-label="APITOLHEIRO"><span class="brand-mark">A</span><span><strong>APITOLHEIRO</strong><small>Painel do tipster</small></span></a>
+        <nav class="side-nav">
+          <p>Análise</p>
+          <button class="nav-item active" type="button" data-view-target="radar"><span>01</span> Radar do dia</button>
+          <button class="nav-item" type="button" data-view-target="screening"><span>02</span> Jogos filtrados</button>
+          <p>Gestão</p>
+          <button class="nav-item" type="button" data-view-target="bets"><span>03</span> Minhas apostas <b id="open-bets-badge">0</b></button>
+          <button class="nav-item" type="button" data-view-target="bankroll"><span>04</span> Banca</button>
+          <button class="nav-item" type="button" data-view-target="ai"><span>05</span> API IA</button>
+          <p>Sistema</p>
+          <button class="nav-item" type="button" data-view-target="method"><span>06</span> Regras e fontes</button>
+        </nav>
+        <div class="owner-box"><span id="owner-state-dot" class="status-dot"></span><div><strong id="owner-state-label">Área privada bloqueada</strong><small id="owner-state-copy">Banca e chaves protegidas</small></div><button id="owner-access" type="button">Desbloquear</button></div>
+      </aside>
 
-      <section class="hero" aria-labelledby="hero-title">
-        <div>
-          <p class="kicker">TIPSTER INTELLIGENCE</p>
-          <h1 id="hero-title">Leitura rápida.<br><em>Decisão consciente.</em></h1>
-          <p class="hero-copy">A sugestão nasce apenas quando o mandante cumpre 6 vitórias nos últimos 10, 3 nos últimos 5 em casa e vantagem mínima de 7 posições. Os demais sinais elevam o Tier; não bloqueiam essa base.</p>
-        </div>
-        <div class="hero-stat"><span>Base obrigatória</span><strong>3 / 3</strong><small>6V/10 · 3V/5 casa · +7 tabela</small></div>
-      </section>
+      <main class="main">
+        <header class="topbar">
+          <div><p id="view-eyebrow">ANÁLISE</p><h1 id="view-title">Radar do dia</h1></div>
+          <div class="topbar-actions"><span class="data-state"><i></i><span id="source-updated">carregando dados</span></span><button id="refresh-button" class="button secondary" type="button">Atualizar</button></div>
+        </header>
 
-      <section class="status-strip" aria-label="Resumo do radar">
-        <div><span>Jogos detectados</span><strong id="screened-count">—</strong></div>
-        <div><span>Análises detalhadas</span><strong id="analyzed-count">—</strong></div>
-        <div><span>Mandantes 3/3</span><strong id="verified-count">—</strong></div>
-        <div><span>Sugestões</span><strong id="qualified-count">—</strong></div>
-        <div><span>Fonte atualizada</span><strong id="source-updated">carregando</strong></div>
-      </section>
-
-      <section id="statsbomb-source" class="source-rail" aria-live="polite">
-        <div><p class="kicker">CAMADA HISTÓRICA</p><h2>StatsBomb Open Data</h2></div>
-        <p id="statsbomb-status">Conferindo a cobertura histórica…</p>
-      </section>
-
-      <section id="football-data-source" class="source-rail source-rail--official" aria-live="polite">
-        <div><p class="kicker">CONFERÊNCIA OFICIAL</p><h2>football-data.org</h2></div>
-        <p id="football-data-status">Conferindo tabelas e forma por competição…</p>
-      </section>
-
-      <section id="publication-status" class="publication-rail" aria-live="polite">
-        <div><p class="kicker">ROTINA AUTOMÁTICA</p><h2>Próxima publicação</h2></div>
-        <p id="publication-copy">Aguardando o estado da rotina noturna…</p>
-      </section>
-
-      <section class="content-header">
-        <div>
-          <p class="kicker">LEITURAS DETALHADAS</p>
-          <h2>Todos os tiers, sem esconder as análises fracas</h2>
-        </div>
-        <div class="actions">
-          <div class="tier-filters" aria-label="Filtrar por tier" role="group">
-            <button class="selected" type="button" data-tier="all">Todos</button>
-            <button type="button" data-tier="1">T1</button>
-            <button type="button" data-tier="2">T2</button>
-            <button type="button" data-tier="3">T3</button>
-            <button type="button" data-tier="4">T4</button>
+        <section class="view active" data-view="radar">
+          <div class="intro-row"><div><h2>Sugestões e leituras</h2><p>Todos os jogos analisados ficam visíveis. A sugestão só nasce quando as três regras obrigatórias são atendidas.</p></div><div class="schedule-note"><span>Rotinas automáticas</span><strong>01:00 · 11:00 · 16:00 · 23:00</strong><small>Horário de São Paulo</small></div></div>
+          <div class="summary-grid" aria-label="Resumo do radar">
+            <article><span>Jogos detectados</span><strong id="screened-count">—</strong><small>nos campeonatos monitorados</small></article>
+            <article><span>Análises</span><strong id="analyzed-count">—</strong><small>com números detalhados</small></article>
+            <article><span>Base 3/3</span><strong id="verified-count">—</strong><small>regras obrigatórias completas</small></article>
+            <article><span>Sugestões</span><strong id="qualified-count">—</strong><small>aptas para decisão</small></article>
           </div>
-          <label class="league-filter" for="league-filter"><span>Campeonato</span><select id="league-filter"><option>Carregando…</option></select></label>
-          <button id="refresh-button" class="refresh-button" type="button">Atualizar leitura</button>
-        </div>
-      </section>
+          <div class="filter-bar"><div class="tier-filters" aria-label="Filtrar por tier" role="group"><button class="selected" type="button" data-tier="all">Todos</button><button type="button" data-tier="1">Tier 1</button><button type="button" data-tier="2">Tier 2</button><button type="button" data-tier="3">Tier 3</button><button type="button" data-tier="4">Tier 4</button></div><label class="select-field"><span>Campeonato</span><select id="league-filter"><option>Carregando…</option></select></label></div>
+          <div id="dashboard" aria-live="polite"><div class="loading-card">Carregando análises…</div></div>
+          <section class="panel compact-panel" aria-labelledby="model-results-title"><div class="panel-heading"><div><span>HISTÓRICO AUTOMÁTICO</span><h2 id="model-results-title">Resultado das sugestões do modelo</h2></div><p id="results-meta">Carregando…</p></div><div id="results"></div></section>
+        </section>
 
-      <section id="dashboard" aria-live="polite">
-        <div class="loading-grid" aria-label="Carregando radar"><div></div><div></div><div></div></div>
-      </section>
+        <section class="view" data-view="screening">
+          <div class="panel-heading page-heading"><div><span>MAPA DA VARREDURA</span><h2>Todos os jogos encontrados</h2></div><p id="screening-meta">Carregando o mapa…</p></div>
+          <div class="filter-bar single-filter"><label class="select-field"><span>Campeonato</span><select id="screening-league-filter"><option>Carregando…</option></select></label></div>
+          <div id="screening" class="panel" aria-live="polite"></div>
+        </section>
 
-      <section class="screening-section" aria-labelledby="screening-title">
-        <div class="screening-heading">
-          <div>
-            <p class="kicker">MAPA DA VARREDURA</p>
-            <h2 id="screening-title">Jogos detectados e prioridade de análise</h2>
+        <section class="view" data-view="bets">
+          <div class="panel-heading page-heading"><div><span>CONTROLE PESSOAL</span><h2>Minhas apostas</h2></div><p>Entradas ficam abertas até você marcar Green ou Red.</p></div>
+          <div id="bets-private-gate" class="private-gate"><h3>Área protegida</h3><p>Desbloqueie a sessão com a senha do proprietário para visualizar ou liquidar suas entradas.</p><button class="button primary unlock-action" type="button">Desbloquear</button></div>
+          <div id="bets-private-content" hidden><div class="summary-grid bet-summary"><article><span>Em aberto</span><strong id="bet-open-count">0</strong><small id="bet-open-exposure">R$ 0,00 comprometidos</small></article><article><span>Green</span><strong id="bet-green-count" class="green-text">0</strong><small>liquidações positivas</small></article><article><span>Red</span><strong id="bet-red-count" class="red-text">0</strong><small>liquidações negativas</small></article><article><span>Resultado</span><strong id="bet-profit">R$ 0,00</strong><small>lucro ou prejuízo realizado</small></article></div><div id="bets-list" class="panel"></div></div>
+        </section>
+
+        <section class="view" data-view="bankroll">
+          <div class="panel-heading page-heading"><div><span>VISÃO FINANCEIRA</span><h2>Banca</h2></div><p>Saldo calculado somente pelas entradas que você registrou.</p></div>
+          <div id="bankroll-private-gate" class="private-gate"><h3>Área protegida</h3><p>Desbloqueie para visualizar e configurar sua banca.</p><button class="button primary unlock-action" type="button">Desbloquear</button></div>
+          <div id="bankroll-private-content" hidden>
+            <div class="bankroll-hero"><div><span>Saldo realizado</span><strong id="bankroll-balance">R$ 0,00</strong><small id="bankroll-result">Resultado: R$ 0,00</small></div><div class="bankroll-side"><span>Disponível após entradas abertas</span><strong id="bankroll-available">R$ 0,00</strong></div></div>
+            <div class="summary-grid"><article><span>Banca inicial</span><strong id="bankroll-initial">R$ 0,00</strong><small>base informada</small></article><article><span>Em aberto</span><strong id="bankroll-exposure">R$ 0,00</strong><small>valor comprometido</small></article><article><span>ROI liquidado</span><strong id="bankroll-roi">0,00%</strong><small>sobre stakes encerradas</small></article><article><span>Placares</span><strong id="bankroll-record">0G · 0R</strong><small>Green e Red manuais</small></article></div>
+            <form id="bankroll-form" class="settings-panel"><div><h3>Definir banca inicial</h3><p>Alterar a base recalcula o saldo; o histórico das entradas permanece.</p></div><label><span>Valor inicial (R$)</span><input id="bankroll-input" type="number" min="0" max="1000000000" step="0.01" required></label><button class="button primary" type="submit">Salvar banca</button><p id="bankroll-message" class="form-message"></p></form>
           </div>
-          <p id="screening-meta">Carregando o mapa de campeonatos…</p>
-        </div>
-        <div id="screening" aria-live="polite"></div>
-      </section>
+        </section>
 
-      <section class="results-section" aria-labelledby="results-title">
-        <div class="screening-heading">
-          <div>
-            <p class="kicker">RESULTADOS DAS PUBLICAÇÕES</p>
-            <h2 id="results-title">Green / Red auditável</h2>
-          </div>
-          <p id="results-meta">Carregando histórico de liquidação…</p>
-        </div>
-        <div id="results" aria-live="polite"></div>
-      </section>
+        <section class="view" data-view="ai">
+          <div class="panel-heading page-heading"><div><span>CONFIGURAÇÃO DIRETA</span><h2>API de inteligência artificial</h2></div><p>Sem confirmação por e-mail. A chave é validada e criptografada no Supabase.</p></div>
+          <div id="ai-private-gate" class="private-gate"><h3>Área protegida</h3><p>Desbloqueie para conectar DeepSeek, OpenAI, Gemini ou Grok.</p><button class="button primary unlock-action" type="button">Desbloquear</button></div>
+          <form id="ai-settings-form" class="settings-panel stacked" hidden>
+            <div class="settings-intro"><h3>Conectar provedor</h3><p id="ai-connection-state">Nenhuma IA configurada.</p></div>
+            <div class="form-grid"><label><span>Provedor</span><select id="ai-provider"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="google">Google Gemini</option><option value="grok">Grok (xAI)</option></select></label><label><span>Modelo</span><input id="ai-model" maxlength="160" value="deepseek-chat" required></label><label class="wide"><span>Chave API</span><input id="ai-api-key" type="password" autocomplete="new-password" minlength="12" maxlength="4096" placeholder="Cole a chave do provedor" required></label><label><span>Análises por rotina</span><input id="ai-max-reviews" type="number" min="0" max="80" value="10" required></label><label class="check-field"><input id="ai-enabled" type="checkbox" checked><span>Usar a IA automaticamente nas sugestões qualificadas</span></label></div>
+            <div class="form-actions"><button class="button primary" type="submit">Testar e conectar</button><p id="ai-settings-status" class="form-message">A chave nunca volta para o navegador depois de salva.</p></div>
+          </form>
+        </section>
 
-      <section class="method">
-        <div><p class="kicker">COMO LER</p><h2>Transparência antes da decisão.</h2></div>
-        <p>O mapa mostra todos os jogos encontrados na última varredura. Uma sugestão exige três fatos do mandante: 6 vitórias nos últimos 10, 3 vitórias nos últimos 5 em casa e vantagem de 7 posições na tabela. Isso inicia em Tier 3; predição, lesões, criação, StatsBomb, fonte oficial e escalação podem elevar a Tier 2 ou 1. StatsBomb é histórico e agregado — não é xG ao vivo.</p>
-      </section>
-    </main>
-    <dialog id="owner-dialog" class="owner-dialog" aria-labelledby="owner-dialog-title">
-      <div class="dialog-heading">
-        <div><p class="kicker">CONFIGURAÇÃO PRIVADA</p><h2 id="owner-dialog-title">Assistente de IA</h2></div>
-        <button id="owner-close" class="dialog-close" type="button" aria-label="Fechar">×</button>
-      </div>
-      <p class="dialog-copy">O acesso é exclusivo do proprietário. A chave é enviada diretamente ao Supabase por conexão segura, criptografada no banco e nunca volta para o navegador, GitHub Pages ou feed público.</p>
-      <section id="owner-auth-panel">
-        <label for="owner-email">E-mail do proprietário</label>
-        <div class="owner-auth-row"><input id="owner-email" type="email" autocomplete="email" inputmode="email" placeholder="seu@email.com"><button id="owner-link" class="refresh-button" type="button">Enviar link de acesso</button></div>
-        <p id="owner-auth-message" class="dialog-note">O link expira conforme a configuração do Supabase. Esta tela não cria uma senha.</p>
-      </section>
-      <form id="ai-settings-form" class="ai-settings" hidden>
-        <div class="settings-grid">
-          <label>Provedor<select id="ai-provider" name="provider"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="google">Google Gemini</option></select></label>
-          <label>Modelo<input id="ai-model" name="model" maxlength="160" value="gpt-4.1-mini" required></label>
-          <label class="wide">Chave da API<input id="ai-api-key" name="api-key" type="password" autocomplete="new-password" minlength="12" maxlength="4096" required placeholder="A chave fica somente no servidor"></label>
-          <label>Máx. de revisões por rotina<input id="ai-max-reviews" name="max-reviews" type="number" min="0" max="80" value="0" required></label>
-          <label class="switch"><input id="ai-enabled" name="enabled" type="checkbox"><span>Ativar revisão automática de IA</span></label>
-        </div>
-        <p id="ai-settings-status" class="dialog-note">Sem chave configurada. Defina 0 para manter a IA desligada; a análise estatística continua independente.</p>
-        <div class="dialog-actions"><button id="owner-signout" class="ghost-button" type="button">Sair</button><button class="refresh-button" type="submit">Salvar configuração segura</button></div>
-      </form>
-    </dialog>
+        <section class="view" data-view="method">
+          <div class="panel-heading page-heading"><div><span>CRITÉRIOS TRANSPARENTES</span><h2>Como o sistema decide</h2></div><p>Odds de mercado não participam do modelo nem dos Tiers.</p></div>
+          <div class="rules-grid"><article><span>01 · obrigatória</span><h3>Últimos 10 jogos</h3><strong>6 vitórias ou mais</strong><p>Mede a forma geral recente do mandante. Sem seis vitórias, o jogo continua visível, mas não vira sugestão.</p></article><article><span>02 · obrigatória</span><h3>Últimos 5 em casa</h3><strong>3 vitórias ou mais</strong><p>Mede o rendimento do mandante em seu próprio estádio.</p></article><article><span>03 · obrigatória</span><h3>Diferença de tabela</h3><strong>7 posições ou mais</strong><p>O mandante precisa estar pelo menos sete posições acima do visitante.</p></article></div>
+          <div class="method-columns"><section class="panel"><span>SINAIS SECUNDÁRIOS</span><h3>O que eleva o Tier</h3><ul><li>Previsão externa da API-Football</li><li>Baixas e força do adversário</li><li>xG real quando houver cobertura ou proxies de criação</li><li>StatsBomb histórico e conferência football-data.org</li><li>Escalação oficial antes do jogo</li><li>Revisão de risco da IA conectada</li></ul></section><section class="panel"><span>ESCALAÇÃO</span><h3>Reconsulta automática</h3><p>O worker procura jogos qualificados entre 25 e 0 minutos antes do início, com prioridade operacional por volta de 20 minutos. Se os titulares ou as baixas mudarem, a probabilidade e o Tier são atualizados; o sistema pode suspender a sugestão.</p><p>Uma segunda checagem ocorre perto de cinco minutos antes do jogo quando a escalação já havia sido confirmada.</p></section><section class="panel"><span>FONTES</span><h3>Dados usados</h3><ul><li>API-Football: jogos, tabela, forma, previsão, lesões e escalação</li><li>football-data.org: conferência de tabela e resultados</li><li>StatsBomb Open Data: histórico agregado e xG quando compatível</li></ul></section></div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="owner-dialog" class="modal" aria-labelledby="owner-dialog-title"><form id="owner-login-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span>ACESSO DO PROPRIETÁRIO</span><h2 id="owner-dialog-title">Desbloquear área privada</h2></div><button id="owner-close" type="button" aria-label="Fechar">×</button></div><p>Banca, apostas e chaves de IA não ficam públicas. A senha é validada no servidor e mantida apenas nesta sessão do navegador.</p><label><span>Senha do proprietário</span><input id="owner-password" type="password" autocomplete="current-password" required></label><p id="owner-auth-message" class="form-message"></p><div class="modal-actions"><button class="button secondary" id="owner-cancel" type="button">Cancelar</button><button class="button primary" type="submit">Entrar</button></div></form></dialog>
+
+    <dialog id="bet-dialog" class="modal" aria-labelledby="bet-dialog-title"><form id="bet-entry-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span>ENTRADA PESSOAL</span><h2 id="bet-dialog-title">Registrar aposta</h2></div><button id="bet-close" type="button" aria-label="Fechar">×</button></div><div class="selected-fixture"><span id="bet-league">Competição</span><strong id="bet-fixture">Mandante × Visitante</strong><small>Mercado pessoal: vitória no tempo regulamentar</small></div><fieldset><legend>Em qual time você entrou?</legend><label><input name="chosen-side" value="home" type="radio" required><span id="bet-home-label">Mandante</span></label><label><input name="chosen-side" value="away" type="radio" required><span id="bet-away-label">Visitante</span></label></fieldset><div class="form-grid"><label><span>Valor da entrada (R$)</span><input id="bet-stake" type="number" min="0.01" max="1000000000" step="0.01" required></label><label><span>Odd oferecida pela casa</span><input id="bet-odds" type="number" min="1.001" max="1000" step="0.001" required></label></div><p class="form-message">A odd informada serve somente para calcular sua banca. Ela não altera o modelo, a probabilidade ou o Tier.</p><p id="bet-entry-message" class="form-message"></p><div class="modal-actions"><button class="button secondary" id="bet-cancel" type="button">Cancelar</button><button class="button primary" type="submit">Confirmar entrada</button></div></form></dialog>
+
     <script src="./config.js"></script>
     <script src="./app.js" defer></script>
   </body>

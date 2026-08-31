@@ -1,10 +1,10 @@
-# APITOLHEIRO Lab
+# APITOLHEIRO
 
 Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, acerto ou probabilidade real: a porcentagem exibida é uma estimativa explicável do modelo v1.
 
 ## O que a V1 faz
 
-- Às 23:30 BRT, varre todos os jogos do dia seguinte nas competições prioritárias já configuradas e publica um Tier 1–4 para cada jogo encontrado. A rotina reutiliza tabela e calendário da temporada por campeonato para calcular forma e mando de todos os confrontos com menos chamadas; previsões entram enquanto houver orçamento seguro.
+- Executa quatro ciclos em America/Sao_Paulo: 23:00 publica o dia seguinte; 01:00, 11:00 e 16:00 atualizam o dia corrente. Dados estáveis têm cache de até 24 horas, enquanto a lista do dia é reconsultada, preservando a franquia gratuita.
 - Mede forma nos últimos 10, recorte dos últimos 5 no mando relevante, diferença de tabela, força do rival, baixas, escalação perto do início e um proxy de criação quando não há xG oficial.
 - Pondera sinais disponíveis. Ausência de dados reduz a confiança; não vira sinal positivo.
 - Mostra Tier 1–4. As três regras obrigatórias iniciam em Tier 3; os sinais esportivos complementares podem elevar a Tier 2 ou 1. A estimativa de probabilidade e a confiança dos dados são informativas, não promessas de resultado. A tela mantém também os Tiers não qualificados, com o motivo e os critérios que passaram ou falharam.
@@ -12,8 +12,9 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 - Sincroniza o catálogo e agregados históricos do StatsBomb Open Data em uma Edge Function separada. São guardadas métricas derivadas por partida e por equipe (xG, finalizações, passes completos e pressões), nunca o payload bruto de eventos.
 - Usa a football-data.org como conferência oficial opcional de tabela e forma por competição. São até duas chamadas cacheáveis por competição presente na varredura. A fonte só substitui a posição de tabela quando os dois times são associados com segurança.
 - Congela cada publicação pré-jogo em um snapshot imutável. Às 02:10 BRT, com novas conferências às 04:10 e 08:10, registra Green, Red ou Anulado. Para o mercado 1X2 recomendado, liquidação é pelo placar aos 90 minutos mais acréscimos — prorrogação e pênaltis não contam.
-- Reconsulta cada sugestão elegível na janela de 20 a 100 minutos antes do início. Quando a API-Football publicar 11 titulares, a tela passa a exibir a escalação, horário e fonte da revisão. Se uma escalação oficial já registrada mudar, ou se surgirem novas baixas listadas em relação à varredura inicial, o sistema registra a diferença, reduz a estimativa de forma conservadora e rebaixa ou suspende a sugestão. A publicação original não é apagada.
-- Oferece uma área exclusiva do proprietário para vincular OpenAI, DeepSeek ou Gemini. A chave é transmitida por HTTPS, criptografada no banco com uma chave mestra do Vault e não é exposta ao feed público, GitHub Pages, logs de UI ou repositório. A revisão de IA é opcional e tem limite explícito por publicação.
+- Reconsulta cada sugestão elegível entre 25 e 0 minutos antes do início, priorizando aproximadamente 20 minutos, e faz uma última conferência perto de cinco minutos quando já havia XI oficial. Mudanças mensuráveis rebaixam ou suspendem a sugestão sem apagar a publicação original.
+- Mantém uma área privada de banca: entrada manual, lado escolhido, valor, odd pessoal, estado aberto e liquidação manual Green/Red. A odd pessoal serve só para calcular lucro/prejuízo; não participa da análise esportiva.
+- Vincula OpenAI, DeepSeek, Gemini ou Grok diretamente por senha de proprietário, sem link de e-mail. A chave é testada no provedor, transmitida por HTTPS e criptografada no banco.
 
 ## Segurança
 
@@ -22,6 +23,7 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 - As RPCs de quota e de leitura de segredo são SECURITY DEFINER com `search_path` fixo e EXECUTE revogado de PUBLIC, anon e authenticated.
 - As Edge Functions `refresh-radar` e `settle-published-bets` só aceitam `Authorization: Bearer CRON_SECRET`, enviado pelo Supabase Cron. Não há botão público que possa consumir a quota.
 - A Edge Function `refresh-statsbomb-history` usa o mesmo cron protegido e não precisa de chave externa. Ela não expõe nem entrega eventos brutos do StatsBomb ao navegador.
+- A Edge Function `owner-control` usa autenticação própria, CORS limitado à página oficial e bloqueio temporário após tentativas inválidas. Tabelas de banca, apostas e credenciais só são acessíveis com service role.
 
 ## Entrega pública via GitHub Pages
 
@@ -38,7 +40,7 @@ A interface pública oficial está em `docs/`, como no modelo de entrega do DASH
 
 O frontend não requer servidor externo ou Vercel. A atualização diária é feita pela Edge Function do Supabase e pelo `pg_cron`.
 
-1. No Supabase, abra **SQL Editor** e crie os cinco valores no Vault (substitua apenas os textos entre aspas):
+1. No Supabase, abra **SQL Editor** e crie os valores no Vault (substitua apenas os textos entre aspas):
 
    ```sql
    select vault.create_secret('SUA_CHAVE_API_FOOTBALL', 'apitolheiro_api_football_key');
@@ -48,15 +50,15 @@ O frontend não requer servidor externo ou Vercel. A atualização diária é fe
    select vault.create_secret('UMA_CHAVE_ALEATORIA_LONGA_E_EXCLUSIVA_PARA_CRIPTOGRAFIA', 'apitolheiro_ai_config_key');
    ```
 
-2. Em **Authentication → URL Configuration**, inclua `https://gioguagnoni-cyber.github.io/APITOLHEIRO/` em **Redirect URLs**. Isso permite que o link mágico da área privada volte à página pública correta.
+2. A migração cria `apitolheiro_owner_secret` no Vault a partir do segredo operacional já existente. Não é necessário configurar redirecionamento de e-mail; a página valida a senha somente na Edge Function.
 
-O job `refresh-radar` roda diariamente às 02:30 UTC, que corresponde a 23:30 BRT do dia anterior, e analisa o dia seguinte. `settle-published-bets` roda às 05:10, 07:10 e 11:10 UTC (02:10, 04:10 e 08:10 BRT) para liquidar publicações pendentes. Ambos usam chaves internas já disponibilizadas pelo runtime do Supabase e não precisam de configuração no navegador.
+Os jobs `refresh-apitolheiro-0100`, `-1100`, `-1600` e `-2300` executam às 01:00, 11:00, 16:00 e 23:00 BRT. O das 23:00 analisa o dia seguinte; os três restantes atualizam o dia corrente. `settle-published-bets` continua auditando as publicações do modelo às 02:10, 04:10 e 08:10 BRT.
 
 O job `refresh-statsbomb-history` executa aos minutos 07 e 37 de cada hora e avança de forma incremental para evitar sobrecarga. O repositório [StatsBomb Open Data](https://github.com/hudl/open-data) é histórico e seletivo, não um feed ao vivo; publicações baseadas nesses agregados exibem a atribuição StatsBomb exigida pela fonte.
 
-O job `refresh-apitolheiro-lineup-review` é chamado a cada 10 minutos, mas a própria função só consulta jogos sugeridos na janela pré-jogo e aplica cache curto. No plano gratuito ela compartilha o teto diário de 100 chamadas com a varredura noturna e prioriza no máximo quatro jogos por ciclo; em planos com quota maior, o mesmo mecanismo continua a registrar a trilha de auditoria sem expor a chave.
+O job `refresh-apitolheiro-lineup-review` é chamado a cada dois minutos, mas não usa a API quando não existe jogo qualificado a 25 minutos ou menos do início. Ele processa até oito jogos por ciclo, usa cache curto e evita repetir uma escalação já finalizada, salvo a conferência final perto de cinco minutos.
 
-O banco já possui as migrações em supabase/migrations. A aplicação usa até 82 chamadas de análise em uma execução, com uma margem diária para a liquidação e falhas de provedor. Se houver mais jogos do que o orçamento permite para previsões individuais, todos recebem o Tier baseado nos sinais já obtidos e a ausência é descrita nos caveats.
+O banco já possui as migrações em `supabase/migrations`. A análise reserva no máximo 78 das 100 chamadas diárias da API-Football e no máximo 70 por execução, deixando margem para escalações. Os quatro horários reaproveitam cache de tabela, temporada, previsão e fonte oficial; ausência de um sinal opcional é registrada, nunca inventada.
 
 ## Desenvolvimento
 
