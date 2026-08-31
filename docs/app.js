@@ -2,15 +2,19 @@
   "use strict";
 
   const config = window.APITOLHEIRO_PUBLIC_CONFIG;
+  const bootstrapToken = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("device") || "";
+  if (/^[0-9a-f]{64}$/i.test(bootstrapToken)) {
+    localStorage.setItem("apitoleiro_device_token", bootstrapToken.toLowerCase());
+    history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  }
   const state = {
     payload: null,
     tier: "all",
     league: "all",
     screeningLeague: "all",
-    ownerPassword: sessionStorage.getItem("apitoleiro_owner_password") || "",
+    deviceToken: (/^[0-9a-f]{64}$/i.test(bootstrapToken) ? bootstrapToken : localStorage.getItem("apitoleiro_device_token") || "").toLowerCase(),
     ownerData: null,
     selectedCandidate: null,
-    pendingCandidate: null,
   };
 
   const $ = (selector) => document.querySelector(selector);
@@ -20,9 +24,7 @@
     results: $("#results"), resultsMeta: $("#results-meta"), refresh: $("#refresh-button"),
     league: $("#league-filter"), screeningLeague: $("#screening-league-filter"),
     updated: $("#source-updated"), viewTitle: $("#view-title"), viewEyebrow: $("#view-eyebrow"),
-    ownerAccess: $("#owner-access"), ownerDialog: $("#owner-dialog"), ownerForm: $("#owner-login-form"),
-    ownerPassword: $("#owner-password"), ownerMessage: $("#owner-auth-message"), ownerDot: $("#owner-state-dot"),
-    ownerLabel: $("#owner-state-label"), ownerCopy: $("#owner-state-copy"), openBadge: $("#open-bets-badge"),
+    openBadge: $("#open-bets-badge"),
     betDialog: $("#bet-dialog"), betForm: $("#bet-entry-form"), betMessage: $("#bet-entry-message"),
     betsList: $("#bets-list"), bankrollForm: $("#bankroll-form"), bankrollMessage: $("#bankroll-message"),
     aiForm: $("#ai-settings-form"), aiProvider: $("#ai-provider"), aiModel: $("#ai-model"),
@@ -267,42 +269,32 @@
     $$(".view").forEach((view) => view.classList.toggle("active", view.dataset.view === name));
     $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.viewTarget === name));
     dom.viewEyebrow.textContent = viewMeta[name]?.[0] || "APITOLHEIRO"; dom.viewTitle.textContent = viewMeta[name]?.[1] || "Painel";
-    if (["bets", "bankroll", "ai"].includes(name) && !state.ownerPassword) openOwnerDialog();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function ownerCall(action, fields = {}, password = state.ownerPassword) {
+  async function ownerCall(action, fields = {}) {
+    if (!state.deviceToken) throw new Error("Este navegador ainda não foi autorizado. Abra o link individual de ativação uma vez.");
     const response = await fetch(`${config.supabaseUrl}/functions/v1/owner-control`, {
       method: "POST", credentials: "omit", cache: "no-store",
-      headers: { apikey: config.publishableKey, Authorization: `Bearer ${password}`, "Content-Type": "application/json" },
+      headers: { apikey: config.publishableKey, Authorization: `Bearer ${state.deviceToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ action, ...fields }),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) { const error = new Error(payload.error || `Operação indisponível (${response.status})`); error.status = response.status; throw error; }
+    if (!response.ok) {
+      if (response.status === 401) { state.deviceToken = ""; localStorage.removeItem("apitoleiro_device_token"); }
+      const error = new Error(payload.error || `Operação indisponível (${response.status})`); error.status = response.status; throw error;
+    }
     return payload;
   }
 
-  function setPrivateVisibility(unlocked) {
-    ["bets", "bankroll"].forEach((name) => { $(`#${name}-private-gate`).hidden = unlocked; $(`#${name}-private-content`).hidden = !unlocked; });
-    $("#ai-private-gate").hidden = unlocked; dom.aiForm.hidden = !unlocked;
-    dom.ownerDot.classList.toggle("connected", unlocked);
-    dom.ownerLabel.textContent = unlocked ? "Área privada desbloqueada" : "Área privada bloqueada";
-    dom.ownerCopy.textContent = unlocked ? "Sessão protegida ativa" : "Banca e chaves protegidas";
-    dom.ownerAccess.textContent = unlocked ? "Bloquear" : "Desbloquear";
-    if (!unlocked) dom.openBadge.textContent = "0";
-  }
-
-  function lockOwner(message = "Sessão privada encerrada.") {
-    state.ownerPassword = ""; state.ownerData = null; sessionStorage.removeItem("apitoleiro_owner_password");
-    setPrivateVisibility(false); dom.ownerMessage.textContent = message;
-  }
-
-  function openOwnerDialog() { dom.ownerMessage.textContent = ""; dom.ownerPassword.value = ""; dom.ownerDialog.showModal(); setTimeout(() => dom.ownerPassword.focus(), 0); }
-
   async function loadOwnerDashboard() {
-    if (!state.ownerPassword) return;
-    try { const data = await ownerCall("dashboard"); state.ownerData = data; setPrivateVisibility(true); renderOwnerData(); }
-    catch (error) { if (error.status === 401 || error.status === 429) lockOwner(error.message); else console.warn("Owner dashboard", error.message); }
+    try { const data = await ownerCall("dashboard"); state.ownerData = data; renderOwnerData(); }
+    catch (error) {
+      console.warn("Owner dashboard", error.message);
+      dom.betsList.replaceChildren(emptyState("Gestão temporariamente indisponível", "Tente atualizar a página em alguns instantes."));
+      dom.aiStatus.textContent = "Não foi possível carregar a configuração agora.";
+      dom.aiStatus.className = "form-message error";
+    }
   }
 
   function renderOwnerData() {
@@ -352,7 +344,6 @@
   }
 
   function openBet(candidate) {
-    if (!state.ownerPassword) { state.pendingCandidate = candidate; openOwnerDialog(); return; }
     state.selectedCandidate = candidate;
     $("#bet-league").textContent = leagueLabel(candidate); $("#bet-fixture").textContent = `${candidate.home?.name || "Mandante"} × ${candidate.away?.name || "Visitante"}`;
     $("#bet-home-label").textContent = candidate.home?.name || "Mandante"; $("#bet-away-label").textContent = candidate.away?.name || "Visitante";
@@ -367,19 +358,7 @@
   dom.league.addEventListener("change", () => { state.league = dom.league.value || "all"; renderCandidates(); });
   dom.screeningLeague.addEventListener("change", () => { state.screeningLeague = dom.screeningLeague.value || "all"; renderScreening(); });
   dom.refresh.addEventListener("click", () => void loadPublic());
-  $$(".unlock-action").forEach((button) => button.addEventListener("click", openOwnerDialog));
-  dom.ownerAccess.addEventListener("click", () => state.ownerPassword ? lockOwner() : openOwnerDialog());
-  $("#owner-close").addEventListener("click", () => dom.ownerDialog.close()); $("#owner-cancel").addEventListener("click", () => dom.ownerDialog.close());
   $("#bet-close").addEventListener("click", () => dom.betDialog.close()); $("#bet-cancel").addEventListener("click", () => dom.betDialog.close());
-
-  dom.ownerForm.addEventListener("submit", async (event) => {
-    event.preventDefault(); const password = dom.ownerPassword.value; const submit = dom.ownerForm.querySelector("button[type='submit']"); submit.disabled = true; dom.ownerMessage.textContent = "Validando…";
-    try {
-      await ownerCall("authenticate", {}, password); state.ownerPassword = password; sessionStorage.setItem("apitoleiro_owner_password", password); dom.ownerPassword.value = ""; dom.ownerDialog.close(); setPrivateVisibility(true); await loadOwnerDashboard();
-      if (state.pendingCandidate) { const candidate = state.pendingCandidate; state.pendingCandidate = null; openBet(candidate); }
-    } catch (error) { dom.ownerMessage.textContent = error.message; dom.ownerMessage.className = "form-message error"; }
-    finally { submit.disabled = false; }
-  });
 
   dom.betForm.addEventListener("submit", async (event) => {
     event.preventDefault(); if (!state.selectedCandidate) return;
@@ -408,10 +387,8 @@
     finally { submit.disabled = false; }
   });
 
-  dom.ownerDialog.addEventListener("click", (event) => { if (event.target === dom.ownerDialog) dom.ownerDialog.close(); });
   dom.betDialog.addEventListener("click", (event) => { if (event.target === dom.betDialog) dom.betDialog.close(); });
 
-  setPrivateVisibility(Boolean(state.ownerPassword));
   void loadPublic();
-  if (state.ownerPassword) void loadOwnerDashboard();
+  void loadOwnerDashboard();
 })();
