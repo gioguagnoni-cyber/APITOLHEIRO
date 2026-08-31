@@ -15,9 +15,6 @@ type AnalysisRow = {
   eligible: boolean;
   favorite_side: "home" | "away";
   recommended_market: string;
-  bookmaker: string | null;
-  odds: number | null;
-  implied_probability: number | null;
   metrics: FixtureInsight["metrics"];
   reasons: string[];
   caveats: string[];
@@ -60,7 +57,7 @@ export async function GET() {
 
   const { data: analyses, error: analysesError } = await supabase
     .from("fixture_analyses")
-    .select("fixture_id, probability, confidence, model_score, tier, eligible, favorite_side, recommended_market, bookmaker, odds, implied_probability, metrics, reasons, caveats, analyzed_at")
+    .select("fixture_id, probability, confidence, model_score, tier, eligible, favorite_side, recommended_market, metrics, reasons, caveats, analyzed_at")
     .order("eligible", { ascending: false })
     .order("probability", { ascending: false })
     .limit(32)
@@ -109,9 +106,6 @@ export async function GET() {
       favorite: analysis.favorite_side,
       favoriteName: analysis.favorite_side === "home" ? home.name : away.name,
       recommendedMarket: analysis.recommended_market,
-      bookmaker: analysis.bookmaker,
-      odds: analysis.odds,
-      impliedProbability: analysis.implied_probability,
       probability: analysis.probability,
       dataConfidence: analysis.confidence,
       score: analysis.model_score,
