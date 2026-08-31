@@ -81,27 +81,6 @@ const databaseRequest = async <T>(path: string, init: RequestInit = {}) => {
 const rpc = <T>(name: string, args: Record<string, unknown> = {}) =>
   databaseRequest<T>(`rpc/${name}`, { method: "POST", body: JSON.stringify(args) });
 
-const constantTimeEquals = (left: string, right: string) => {
-  const encoder = new TextEncoder();
-  const a = encoder.encode(left);
-  const b = encoder.encode(right);
-  if (a.length !== b.length) return false;
-  let difference = 0;
-  for (let index = 0; index < a.length; index += 1) difference |= a[index] ^ b[index];
-  return difference === 0;
-};
-
-const sha256 = async (value: string) => {
-  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return [...new Uint8Array(bytes)].map((item) => item.toString(16).padStart(2, "0")).join("");
-};
-
-const requestFingerprint = async (request: Request) => {
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  const agent = request.headers.get("user-agent") || "unknown";
-  return sha256(`${forwarded}|${agent.slice(0, 200)}`);
-};
-
 const originHeaders = (request: Request) => {
   const origin = request.headers.get("origin");
   return {
@@ -119,29 +98,39 @@ const json = (request: Request, body: Record<string, unknown>, status = 200) =>
 
 const one = <T>(value: T | T[]) => Array.isArray(value) ? value[0] : value;
 
-const checkRateLimit = async (fingerprint: string) => {
-  const query = new URLSearchParams({ select: "attempts,window_started_at,blocked_until", fingerprint: `eq.${fingerprint}`, limit: "1" });
-  const rows = await databaseRequest<Array<{ attempts: number; window_started_at: string; blocked_until: string | null }>>(`owner_access_attempts?${query}`);
-  const row = rows[0];
-  return !row?.blocked_until || new Date(row.blocked_until).getTime() <= Date.now();
+const sha256 = async (value: string) => {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(bytes)].map((item) => item.toString(16).padStart(2, "0")).join("");
 };
 
-const recordFailedAccess = async (fingerprint: string) => {
-  const query = new URLSearchParams({ select: "attempts,window_started_at", fingerprint: `eq.${fingerprint}`, limit: "1" });
-  const rows = await databaseRequest<Array<{ attempts: number; window_started_at: string }>>(`owner_access_attempts?${query}`);
-  const current = rows[0];
-  const expired = !current || Date.now() - new Date(current.window_started_at).getTime() > 15 * 60_000;
-  const attempts = expired ? 1 : clamp(Number(current.attempts) + 1, 1, 100);
-  const blockedUntil = attempts >= 8 ? new Date(Date.now() + 30 * 60_000).toISOString() : null;
-  await databaseRequest("owner_access_attempts?on_conflict=fingerprint", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({ fingerprint, attempts, window_started_at: expired ? utcNow() : current.window_started_at, blocked_until: blockedUntil, updated_at: utcNow() }),
+const authorizeDevice = async (request: Request) => {
+  const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
+  if (!/^[0-9a-f]{64}$/i.test(token)) return false;
+  const tokenHash = await sha256(token.toLowerCase());
+  const query = new URLSearchParams({ select: "id", token_hash: `eq.${tokenHash}`, active: "eq.true", limit: "1" });
+  const devices = await databaseRequest<Array<{ id: string }>>(`owner_devices?${query}`);
+  if (!devices[0]) return false;
+  await databaseRequest(`owner_devices?id=eq.${encodeURIComponent(devices[0].id)}`, {
+    method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_seen_at: utcNow() }),
   });
+  return true;
 };
 
-const clearFailedAccess = (fingerprint: string) =>
-  databaseRequest(`owner_access_attempts?fingerprint=eq.${fingerprint}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+const requestWindows = new Map<string, { count: number; startedAt: number }>();
+const withinRequestLimit = (request: Request, action: string) => {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const key = `${forwarded}|${(request.headers.get("user-agent") || "unknown").slice(0, 120)}`;
+  const now = Date.now();
+  const current = requestWindows.get(key);
+  const windowMs = 15 * 60_000;
+  const limit = action === "dashboard" ? 180 : 60;
+  if (!current || now - current.startedAt >= windowMs) {
+    requestWindows.set(key, { count: 1, startedAt: now });
+    return true;
+  }
+  current.count += 1;
+  return current.count <= limit;
+};
 
 const ownerDashboard = async () => {
   const [settings, bets, ai] = await Promise.all([
@@ -295,22 +284,16 @@ const saveAi = async (payload: Record<string, unknown>) => {
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: originHeaders(request) });
   const origin = request.headers.get("origin");
-  if (origin && !ALLOWED_ORIGINS.has(origin)) return json(request, { error: "Origin not allowed." }, 403);
+  if (!origin || !ALLOWED_ORIGINS.has(origin)) return json(request, { error: "Origin not allowed." }, 403);
   if (request.method !== "POST") return json(request, { error: "Method not allowed." }, 405);
   if (!projectUrl() || !firstServerKey()) return json(request, { error: "Server configuration is incomplete." }, 503);
-  const fingerprint = await requestFingerprint(request);
+  const clientKey = request.headers.get("apikey") || "";
+  if (!clientKey.startsWith("sb_publishable_")) return json(request, { error: "Public client key required." }, 401);
   try {
-    if (!await checkRateLimit(fingerprint)) return json(request, { error: "Muitas tentativas. Aguarde 30 minutos." }, 429);
-    const received = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
-    const ownerSecret = await rpc<string | null>("get_owner_access_secret");
-    if (!ownerSecret || !received || !constantTimeEquals(received, ownerSecret)) {
-      await recordFailedAccess(fingerprint);
-      return json(request, { error: "Senha do proprietário inválida." }, 401);
-    }
-    await clearFailedAccess(fingerprint);
     const payload = await request.json().catch(() => ({})) as Record<string, unknown>;
-    const action = typeof payload.action === "string" ? payload.action : "authenticate";
-    if (action === "authenticate") return json(request, { ok: true, authenticated: true });
+    const action = typeof payload.action === "string" ? payload.action : "dashboard";
+    if (!withinRequestLimit(request, action)) return json(request, { error: "Muitas operações. Aguarde alguns minutos." }, 429);
+    if (!await authorizeDevice(request)) return json(request, { error: "Dispositivo não autorizado." }, 401);
     if (action === "dashboard") return json(request, { ok: true, ...(await ownerDashboard()) });
     if (action === "set_bankroll") await saveBankroll(payload.initialAmount);
     else if (action === "create_bet") await createBet(payload);
