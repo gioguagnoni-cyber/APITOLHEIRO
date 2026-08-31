@@ -110,11 +110,6 @@ function CandidateCard({ candidate }: { candidate: FixtureInsight }) {
       </div>
 
       <div className="card-footer">
-        <div className="odd-panel">
-          <span>Odd {candidate.bookmaker ? "· " + candidate.bookmaker : ""}</span>
-          <strong>{candidate.odds ? candidate.odds.toFixed(2) : "—"}</strong>
-          <small>{candidate.impliedProbability ? candidate.impliedProbability + "% implícita" : "mercado indisponível"}</small>
-        </div>
         <div className="confidence-panel">
           <span>Confiança dos dados</span>
           <div className="confidence-track"><i style={{ width: Math.round(candidate.dataConfidence * 100) + "%" }} /></div>
@@ -191,7 +186,7 @@ export default function HomePage() {
           <div className="hero-stat">
             <span>Prioridade</span>
             <strong>≥ 75%</strong>
-            <small>com odd entre 1,30 e 2,90</small>
+            <small>estimativa do modelo</small>
           </div>
         </section>
 
