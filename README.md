@@ -13,17 +13,19 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 - Usa a football-data.org como conferência oficial opcional de tabela e forma por competição. São até duas chamadas cacheáveis por competição presente na varredura. A fonte só substitui a posição de tabela quando os dois times são associados com segurança.
 - Congela cada publicação pré-jogo em um snapshot imutável. Às 02:10 BRT, com novas conferências às 04:10 e 08:10, registra Green, Red ou Anulado. Para o mercado 1X2 recomendado, liquidação é pelo placar aos 90 minutos mais acréscimos — prorrogação e pênaltis não contam.
 - Reconsulta cada sugestão elegível entre 25 e 0 minutos antes do início, priorizando aproximadamente 20 minutos, e faz uma última conferência perto de cinco minutos quando já havia XI oficial. Mudanças mensuráveis rebaixam ou suspendem a sugestão sem apagar a publicação original.
-- Mantém uma área privada de banca: entrada manual, lado escolhido, valor, odd pessoal, estado aberto e liquidação manual Green/Red. A odd pessoal serve só para calcular lucro/prejuízo; não participa da análise esportiva.
-- Vincula OpenAI, DeepSeek, Gemini ou Grok diretamente por senha de proprietário, sem link de e-mail. A chave é testada no provedor, transmitida por HTTPS e criptografada no banco.
+- Mantém a gestão direta de banca: entrada manual, lado escolhido, valor, odd pessoal, estado aberto e liquidação manual Green/Red. A odd pessoal serve só para calcular lucro/prejuízo; não participa da análise esportiva.
+- Vincula OpenAI, DeepSeek, Gemini ou Grok diretamente, sem senha e sem link de e-mail. A chave é testada no provedor, transmitida por HTTPS e criptografada no banco.
 
 ## Segurança
 
 - API-Football, football-data.org e o segredo de cron ficam no Supabase Vault; nenhum deles é enviado ao GitHub Pages, ao navegador ou ao repositório.
 - Todas as tabelas do schema public usam RLS e não têm política pública. Só o backend com service role lê e escreve.
-- As RPCs de quota e de leitura de segredo são SECURITY DEFINER com `search_path` fixo e EXECUTE revogado de PUBLIC, anon e authenticated.
+- As RPCs de quota e leitura de chaves operacionais são SECURITY DEFINER com `search_path` fixo e EXECUTE revogado de PUBLIC, anon e authenticated.
 - As Edge Functions `refresh-radar` e `settle-published-bets` só aceitam `Authorization: Bearer CRON_SECRET`, enviado pelo Supabase Cron. Não há botão público que possa consumir a quota.
 - A Edge Function `refresh-statsbomb-history` usa o mesmo cron protegido e não precisa de chave externa. Ela não expõe nem entrega eventos brutos do StatsBomb ao navegador.
-- A Edge Function `owner-control` usa autenticação própria, CORS limitado à página oficial e bloqueio temporário após tentativas inválidas. Tabelas de banca, apostas e credenciais só são acessíveis com service role.
+- A Edge Function `owner-control` não pede senha. Um link individual de ativação grava no navegador um token aleatório; somente o hash SHA-256 é guardado no banco. A função aceita a origem oficial/ambiente local e limita requisições. Tabelas de banca, apostas e credenciais continuam acessíveis somente com service role.
+
+> **Modo individual sem login:** abra uma vez o link individual entregue ao proprietário. O token fica no armazenamento local desse navegador, é removido imediatamente da barra de endereço e nunca é uma senha digitada. Para trocar de navegador, gere uma nova autorização no Supabase.
 
 ## Entrega pública via GitHub Pages
 
@@ -50,7 +52,7 @@ O frontend não requer servidor externo ou Vercel. A atualização diária é fe
    select vault.create_secret('UMA_CHAVE_ALEATORIA_LONGA_E_EXCLUSIVA_PARA_CRIPTOGRAFIA', 'apitolheiro_ai_config_key');
    ```
 
-2. A migração cria `apitolheiro_owner_secret` no Vault a partir do segredo operacional já existente. Não é necessário configurar redirecionamento de e-mail; a página valida a senha somente na Edge Function.
+2. Não existe senha de proprietário, login ou redirecionamento de e-mail. Na primeira abertura, use o link individual de ativação; depois, a URL normal abre diretamente banca, apostas e configuração de IA.
 
 Os jobs `refresh-apitolheiro-0100`, `-1100`, `-1600` e `-2300` executam às 01:00, 11:00, 16:00 e 23:00 BRT. O das 23:00 analisa o dia seguinte; os três restantes atualizam o dia corrente. `settle-published-bets` continua auditando as publicações do modelo às 02:10, 04:10 e 08:10 BRT.
 
