@@ -250,7 +250,8 @@
       const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/get_public_tipster_dashboard`, { method: "POST", cache: "no-store", credentials: "omit", headers: { apikey: config.publishableKey, Authorization: `Bearer ${config.publishableKey}`, "Content-Type": "application/json" }, body: "{}" });
       if (!response.ok) throw new Error(`Feed indisponível (${response.status})`);
       const payload = await response.json();
-      if (!payload || payload.schemaVersion !== 11 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures)) throw new Error("Contrato público incompatível.");
+      const schemaVersion = Number(payload?.schemaVersion);
+      if (!payload || !Number.isFinite(schemaVersion) || schemaVersion < 10 || !Array.isArray(payload.candidates) || !Array.isArray(payload.screenedFixtures)) throw new Error("Contrato público incompatível.");
       state.payload = payload; syncLeagues(); setSummary(); renderCandidates(); renderScreening(); renderResults();
     } catch (error) {
       console.warn("APITOLHEIRO public feed", error instanceof Error ? error.message : "unknown");
