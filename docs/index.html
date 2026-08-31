@@ -24,7 +24,6 @@
           <p>Sistema</p>
           <button class="nav-item" type="button" data-view-target="method"><span>06</span> Regras e fontes</button>
         </nav>
-        <div class="owner-box"><span id="owner-state-dot" class="status-dot"></span><div><strong id="owner-state-label">Área privada bloqueada</strong><small id="owner-state-copy">Banca e chaves protegidas</small></div><button id="owner-access" type="button">Desbloquear</button></div>
       </aside>
 
       <main class="main">
@@ -54,14 +53,12 @@
 
         <section class="view" data-view="bets">
           <div class="panel-heading page-heading"><div><span>CONTROLE PESSOAL</span><h2>Minhas apostas</h2></div><p>Entradas ficam abertas até você marcar Green ou Red.</p></div>
-          <div id="bets-private-gate" class="private-gate"><h3>Área protegida</h3><p>Desbloqueie a sessão com a senha do proprietário para visualizar ou liquidar suas entradas.</p><button class="button primary unlock-action" type="button">Desbloquear</button></div>
-          <div id="bets-private-content" hidden><div class="summary-grid bet-summary"><article><span>Em aberto</span><strong id="bet-open-count">0</strong><small id="bet-open-exposure">R$ 0,00 comprometidos</small></article><article><span>Green</span><strong id="bet-green-count" class="green-text">0</strong><small>liquidações positivas</small></article><article><span>Red</span><strong id="bet-red-count" class="red-text">0</strong><small>liquidações negativas</small></article><article><span>Resultado</span><strong id="bet-profit">R$ 0,00</strong><small>lucro ou prejuízo realizado</small></article></div><div id="bets-list" class="panel"></div></div>
+          <div id="bets-private-content"><div class="summary-grid bet-summary"><article><span>Em aberto</span><strong id="bet-open-count">0</strong><small id="bet-open-exposure">R$ 0,00 comprometidos</small></article><article><span>Green</span><strong id="bet-green-count" class="green-text">0</strong><small>liquidações positivas</small></article><article><span>Red</span><strong id="bet-red-count" class="red-text">0</strong><small>liquidações negativas</small></article><article><span>Resultado</span><strong id="bet-profit">R$ 0,00</strong><small>lucro ou prejuízo realizado</small></article></div><div id="bets-list" class="panel"></div></div>
         </section>
 
         <section class="view" data-view="bankroll">
           <div class="panel-heading page-heading"><div><span>VISÃO FINANCEIRA</span><h2>Banca</h2></div><p>Saldo calculado somente pelas entradas que você registrou.</p></div>
-          <div id="bankroll-private-gate" class="private-gate"><h3>Área protegida</h3><p>Desbloqueie para visualizar e configurar sua banca.</p><button class="button primary unlock-action" type="button">Desbloquear</button></div>
-          <div id="bankroll-private-content" hidden>
+          <div id="bankroll-private-content">
             <div class="bankroll-hero"><div><span>Saldo realizado</span><strong id="bankroll-balance">R$ 0,00</strong><small id="bankroll-result">Resultado: R$ 0,00</small></div><div class="bankroll-side"><span>Disponível após entradas abertas</span><strong id="bankroll-available">R$ 0,00</strong></div></div>
             <div class="summary-grid"><article><span>Banca inicial</span><strong id="bankroll-initial">R$ 0,00</strong><small>base informada</small></article><article><span>Em aberto</span><strong id="bankroll-exposure">R$ 0,00</strong><small>valor comprometido</small></article><article><span>ROI liquidado</span><strong id="bankroll-roi">0,00%</strong><small>sobre stakes encerradas</small></article><article><span>Placares</span><strong id="bankroll-record">0G · 0R</strong><small>Green e Red manuais</small></article></div>
             <form id="bankroll-form" class="settings-panel"><div><h3>Definir banca inicial</h3><p>Alterar a base recalcula o saldo; o histórico das entradas permanece.</p></div><label><span>Valor inicial (R$)</span><input id="bankroll-input" type="number" min="0" max="1000000000" step="0.01" required></label><button class="button primary" type="submit">Salvar banca</button><p id="bankroll-message" class="form-message"></p></form>
@@ -69,9 +66,8 @@
         </section>
 
         <section class="view" data-view="ai">
-          <div class="panel-heading page-heading"><div><span>CONFIGURAÇÃO DIRETA</span><h2>API de inteligência artificial</h2></div><p>Sem confirmação por e-mail. A chave é validada e criptografada no Supabase.</p></div>
-          <div id="ai-private-gate" class="private-gate"><h3>Área protegida</h3><p>Desbloqueie para conectar DeepSeek, OpenAI, Gemini ou Grok.</p><button class="button primary unlock-action" type="button">Desbloquear</button></div>
-          <form id="ai-settings-form" class="settings-panel stacked" hidden>
+          <div class="panel-heading page-heading"><div><span>CONFIGURAÇÃO DIRETA</span><h2>API de inteligência artificial</h2></div><p>Sem senha e sem confirmação por e-mail. A chave é validada e criptografada no Supabase.</p></div>
+          <form id="ai-settings-form" class="settings-panel stacked">
             <div class="settings-intro"><h3>Conectar provedor</h3><p id="ai-connection-state">Nenhuma IA configurada.</p></div>
             <div class="form-grid"><label><span>Provedor</span><select id="ai-provider"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="google">Google Gemini</option><option value="grok">Grok (xAI)</option></select></label><label><span>Modelo</span><input id="ai-model" maxlength="160" value="deepseek-chat" required></label><label class="wide"><span>Chave API</span><input id="ai-api-key" type="password" autocomplete="new-password" minlength="12" maxlength="4096" placeholder="Cole a chave do provedor" required></label><label><span>Análises por rotina</span><input id="ai-max-reviews" type="number" min="0" max="80" value="10" required></label><label class="check-field"><input id="ai-enabled" type="checkbox" checked><span>Usar a IA automaticamente nas sugestões qualificadas</span></label></div>
             <div class="form-actions"><button class="button primary" type="submit">Testar e conectar</button><p id="ai-settings-status" class="form-message">A chave nunca volta para o navegador depois de salva.</p></div>
@@ -86,11 +82,9 @@
       </main>
     </div>
 
-    <dialog id="owner-dialog" class="modal" aria-labelledby="owner-dialog-title"><form id="owner-login-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span>ACESSO DO PROPRIETÁRIO</span><h2 id="owner-dialog-title">Desbloquear área privada</h2></div><button id="owner-close" type="button" aria-label="Fechar">×</button></div><p>Banca, apostas e chaves de IA não ficam públicas. A senha é validada no servidor e mantida apenas nesta sessão do navegador.</p><label><span>Senha do proprietário</span><input id="owner-password" type="password" autocomplete="current-password" required></label><p id="owner-auth-message" class="form-message"></p><div class="modal-actions"><button class="button secondary" id="owner-cancel" type="button">Cancelar</button><button class="button primary" type="submit">Entrar</button></div></form></dialog>
-
     <dialog id="bet-dialog" class="modal" aria-labelledby="bet-dialog-title"><form id="bet-entry-form" method="dialog" class="modal-card"><div class="modal-heading"><div><span>ENTRADA PESSOAL</span><h2 id="bet-dialog-title">Registrar aposta</h2></div><button id="bet-close" type="button" aria-label="Fechar">×</button></div><div class="selected-fixture"><span id="bet-league">Competição</span><strong id="bet-fixture">Mandante × Visitante</strong><small>Mercado pessoal: vitória no tempo regulamentar</small></div><fieldset><legend>Em qual time você entrou?</legend><label><input name="chosen-side" value="home" type="radio" required><span id="bet-home-label">Mandante</span></label><label><input name="chosen-side" value="away" type="radio" required><span id="bet-away-label">Visitante</span></label></fieldset><div class="form-grid"><label><span>Valor da entrada (R$)</span><input id="bet-stake" type="number" min="0.01" max="1000000000" step="0.01" required></label><label><span>Odd oferecida pela casa</span><input id="bet-odds" type="number" min="1.001" max="1000" step="0.001" required></label></div><p class="form-message">A odd informada serve somente para calcular sua banca. Ela não altera o modelo, a probabilidade ou o Tier.</p><p id="bet-entry-message" class="form-message"></p><div class="modal-actions"><button class="button secondary" id="bet-cancel" type="button">Cancelar</button><button class="button primary" type="submit">Confirmar entrada</button></div></form></dialog>
 
     <script src="./config.js?v=20260831"></script>
-    <script src="./app.js?v=20260831-2" defer></script>
+    <script src="./app.js?v=20260831-3" defer></script>
   </body>
 </html>
