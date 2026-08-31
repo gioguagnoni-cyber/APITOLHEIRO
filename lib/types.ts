@@ -44,9 +44,6 @@ export type FixtureInsight = {
   favorite: "home" | "away";
   favoriteName: string;
   recommendedMarket: string;
-  bookmaker: string | null;
-  odds: number | null;
-  impliedProbability: number | null;
   probability: number;
   dataConfidence: number;
   score: number;
