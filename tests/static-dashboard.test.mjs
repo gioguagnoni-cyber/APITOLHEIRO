@@ -9,7 +9,7 @@ test("a entrega pública separa o feed esportivo do controle privado", () => {
   const script = read("docs/app.js");
   assert.match(page, /<script src="\.\/config\.js"><\/script>/);
   assert.match(script, /rpc\/get_public_tipster_dashboard/);
-  assert.match(script, /schemaVersion !== 10/);
+  assert.match(script, /schemaVersion !== 11/);
   assert.match(script, /functions\/v1\/owner-control/);
   assert.match(script, /credentials: "omit"/);
   assert.doesNotMatch(script, /v3\.football\.api-sports\.io|x-apisports-key|cron_secret|supabase_secret|service_role/i);
