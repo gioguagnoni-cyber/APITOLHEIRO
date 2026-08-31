@@ -802,10 +802,9 @@ const persistInsight = async (fixture: ProviderFixture, insight: Insight, target
     venue_name: fixture.fixture.venue?.name || null,
   });
   const analysis = await upsert<{ id: string }>("fixture_analyses", "fixture_id", {
-    fixture_id: savedFixture.id, model_version: "v2.4-no-odds", probability: insight.probability, confidence: insight.dataConfidence,
+    fixture_id: savedFixture.id, model_version: "v2.4-sports-only", probability: insight.probability, confidence: insight.dataConfidence,
     model_score: insight.score, tier: insight.tier, eligible: insight.eligible, favorite_side: insight.favorite,
-    recommended_market: insight.recommendedMarket, bookmaker: null, odds: null, implied_probability: null,
-    metrics: insight.metrics, reasons: insight.reasons, caveats: insight.caveats,
+    recommended_market: insight.recommendedMarket, metrics: insight.metrics, reasons: insight.reasons, caveats: insight.caveats,
     analyzed_at: insight.sourceUpdatedAt,
   });
   // Resolution ignores a duplicate rather than mutating the pre-match snapshot.
@@ -819,13 +818,11 @@ const persistInsight = async (fixture: ProviderFixture, insight: Insight, target
       market_code: "match_winner_90",
       favorite_side: insight.favorite,
       recommended_market: insight.recommendedMarket,
-      model_version: "v2.4-no-odds",
+      model_version: "v2.4-sports-only",
       probability: insight.probability,
       confidence: insight.dataConfidence,
       tier: insight.tier,
       eligible: insight.eligible,
-      odds: null,
-      bookmaker: null,
       model_snapshot: {
         analysisId: analysis.id,
         score: insight.score,
