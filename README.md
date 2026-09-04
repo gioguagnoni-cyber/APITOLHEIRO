@@ -6,7 +6,7 @@ Dashboard pré-jogo para organizar sinais de tipster. Ele não promete retorno, 
 
 - Executa quatro ciclos em America/Sao_Paulo: 23:00 publica o dia seguinte; 01:00, 11:00 e 16:00 atualizam o dia corrente. Dados estáveis têm cache de até 24 horas, enquanto a lista do dia é reconsultada, preservando a franquia gratuita.
 - Mede forma nos últimos 10, recorte dos últimos 5 no mando relevante, diferença de tabela, força do rival, baixas, escalação perto do início e um proxy de criação quando não há xG oficial.
-- Pondera sinais disponíveis. Ausência de dados reduz a confiança; não vira sinal positivo.
+- Pondera sinais disponíveis. Ausência de dados reduz a confiança; não vira sinal positivo. A lista prioritária recebe a maior parte da quota, mas cada rotina também explora até 8 jogos fora dela para evitar descarte automático de oportunidades.
 - Mostra Tier 1–4. As três regras obrigatórias iniciam em Tier 3; os sinais esportivos complementares podem elevar a Tier 2 ou 1. A estimativa de probabilidade e a confiança dos dados são informativas, não promessas de resultado. A tela mantém também os Tiers não qualificados, com o motivo e os critérios que passaram ou falharam.
 - Mantém cache por endpoint, registra todas as chamadas efetivas e reserva quota atomicamente antes de chamar o provedor.
 - Sincroniza o catálogo e agregados históricos do StatsBomb Open Data em uma Edge Function separada. São guardadas métricas derivadas por partida e por equipe (xG, finalizações, passes completos e pressões), nunca o payload bruto de eventos.
